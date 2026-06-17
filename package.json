@@ -1,0 +1,31 @@
+{
+  "name": "tabiwari",
+  "version": "0.1.0",
+  "private": true,
+  "description": "旅行・イベント割り勘＆支出分析アプリ",
+  "scripts": {
+    "dev": "concurrently -k -n client,server -c blue,green \"npm:dev:client\" \"npm:dev:server\"",
+    "dev:client": "esbuild src/client/main.ts --bundle --sourcemap --outfile=public/main.js --watch",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "esbuild src/client/main.ts --bundle --minify --outfile=public/main.js",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "db:setup": "tsx scripts/db-setup.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.23.0",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4"
+  }
+}

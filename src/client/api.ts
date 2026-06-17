@@ -1,0 +1,52 @@
+// サーバー API を叩く薄いラッパー
+
+export type Trip = { id: number; title: string; start_date: string | null; end_date: string | null; total?: number };
+export type Member = { id: number; name: string };
+export type Item = { id: number; name: string; price: number; quantity: number; member_ids: number[] };
+export type Receipt = {
+  id: number;
+  store_name: string | null;
+  category: string | null;
+  purchased_on: string;
+  paid_by: number | null;
+  lat: number | null;
+  lng: number | null;
+  place_name: string | null;
+  has_photo: boolean;
+  total: number;
+  items: Item[];
+};
+export type Analytics = {
+  byCategory: { category: string; total: number }[];
+  byTrip: { title: string; total: number }[];
+};
+export type PerMember = { memberId: number; name: string; paid: number; owed: number; net: number };
+export type Transfer = { from: number; to: number; amount: number };
+export type TripDetail = {
+  trip: Trip;
+  members: Member[];
+  receipts: Receipt[];
+  summary: { total: number; perMember: PerMember[]; settlement: Transfer[] };
+};
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as any).error || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  listTrips: () => fetch('/api/trips').then((r) => json<Trip[]>(r)),
+  getTrip: (id: number) => fetch(`/api/trips/${id}`).then((r) => json<TripDetail>(r)),
+  createTrip: (body: { title: string; start_date?: string; end_date?: string }) =>
+    fetch('/api/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Trip>(r)),
+  addMember: (tripId: number, name: string) =>
+    fetch(`/api/trips/${tripId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Member>(r)),
+  addReceipt: (tripId: number, body: unknown) =>
+    fetch(`/api/trips/${tripId}/receipts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number }>(r)),
+  deleteReceipt: (id: number) => fetch(`/api/receipts/${id}`, { method: 'DELETE' }),
+  analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
+  photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
+};
