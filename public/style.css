@@ -18,7 +18,10 @@ body {
   color: var(--text);
   background: var(--bg);
   line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
+img { max-width: 100%; }
 
 .appbar {
   display: flex;
@@ -161,3 +164,32 @@ button.primary:hover { filter: brightness(1.08); }
 .modal-head strong { font-size: 17px; }
 .modal-meta { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .modal-total { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; font-size: 16px; }
+
+/* スマホ対応 */
+@media (max-width: 600px) {
+  .appbar { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 16px; }
+  main { margin: 12px auto; padding: 0 12px; gap: 12px; }
+  .card { padding: 14px 16px; }
+  h1 { font-size: 20px; }
+
+  /* フォームは縦積み・入力欄は全幅 */
+  .row { gap: 8px; }
+  .field { flex: 1 1 100%; }
+  .field input, .field select { width: 100%; }
+  .row > input, .row > button, .row > select { flex: 1 1 100%; }
+  input.grow, input.price { flex: 1 1 100%; width: 100%; }
+  .item-row { gap: 6px; }
+  .checks { gap: 6px 14px; }
+
+  /* 集計テーブルを詰める */
+  .table { font-size: 13px; }
+  .table th, .table td { padding: 5px 4px; }
+
+  .trip-grid { grid-template-columns: 1fr 1fr; }
+  .memory-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .charts { grid-template-columns: 1fr; }
+  .map { height: 300px; }
+
+  .overlay { padding: 10px; }
+  .tab { padding: 8px 12px; }
+}
