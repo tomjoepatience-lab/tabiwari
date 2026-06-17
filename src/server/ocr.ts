@@ -3,7 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 // レシート画像を Claude(vision) に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
 // Tesseract より日本語レシートの精度が高い。APIキーはサーバーのみが持つ。
 
-const MODEL = 'claude-opus-4-8';
+// OCR は抽出タスクなので低コストな Haiku で十分（Opus の約1/5）。
+// 精度が足りなければ 'claude-sonnet-4-6'（中間）や 'claude-opus-4-8'（最上位）に上げる。
+const MODEL = 'claude-haiku-4-5';
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
