@@ -297,12 +297,15 @@ function receiptForm(d: TripDetail) {
     photoData = await resizeImage(file);
     preview.src = photoData;
     preview.style.display = 'block';
-    ocrStatus.textContent = '読み取り中… 0%';
+    ocrStatus.textContent = '読み取り中…（数秒かかります）';
     try {
-      const drafts = await runOcr(file, (p) => { ocrStatus.textContent = `読み取り中… ${Math.round(p * 100)}%`; });
-      if (drafts.length) {
-        setItems(drafts);
-        ocrStatus.textContent = `${drafts.length}件の明細を読み取りました（金額・負担者を確認してください）`;
+      const result = await runOcr(photoData);
+      if (result.items.length) {
+        setItems(result.items);
+        if (result.store_name && !store.value) store.value = result.store_name;
+        if (result.category && CATEGORIES.includes(result.category)) category.value = result.category;
+        if (result.purchased_on) date.value = result.purchased_on;
+        ocrStatus.textContent = `${result.items.length}件の明細を読み取りました（金額・負担者を確認してください）`;
       } else {
         ocrStatus.textContent = '明細を読み取れませんでした。手入力してください。';
       }
@@ -355,7 +358,7 @@ function receiptForm(d: TripDetail) {
     el('div', { class: 'row' }, [labeled('店名', store), labeled('カテゴリ', category)]),
     el('div', { class: 'row' }, [labeled('日付', date), labeled('払った人', paidBy)]),
     el('div', { class: 'row' }, [labeled('写真', photoInput), el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])])]),
-    el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: 'レシート読取（OCR・写真も添付されます）' }), el('div', { class: 'row' }, [ocrInput, ocrStatus])]),
+    el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: 'レシート読取（AIが明細を自動入力・写真も添付されます）' }), el('div', { class: 'row' }, [ocrInput, ocrStatus])]),
     preview,
     el('h3', { textContent: '明細（商品ごとに負担者を選ぶ／OCRの下書きを修正）' }),
     itemsWrap,

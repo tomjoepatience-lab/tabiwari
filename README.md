@@ -11,10 +11,11 @@
 - **写真添付**：思い出タブに写真カード → クリックで大きい写真＋割り勘詳細
 - **地図**：レシートを Leaflet のピンで表示（店名・カテゴリ・写真と連動）
 - **分析**：カテゴリ別・旅行別の支出グラフ（Chart.js）
-- **レシートOCR**：画像から明細の下書きを自動入力（Tesseract.js／手修正前提）
+- **レシートOCR**：画像から店名・日付・カテゴリ・明細を自動抽出（Claude vision／手修正前提）
 
 ## 技術スタック
-- フロント: HTML / CSS / TypeScript（素の DOM、esbuild でバンドル）。Leaflet / Chart.js / Tesseract.js
+- フロント: HTML / CSS / TypeScript（素の DOM、esbuild でバンドル）。Leaflet / Chart.js
+- OCR: Claude vision（`@anthropic-ai/sdk`、サーバー経由）
 - バック: Node.js + Express
 - DB: PostgreSQL
 - デプロイ: GitHub → Render
@@ -39,7 +40,7 @@ npm run dev                   # http://localhost:3000
 ## デプロイ（Render）
 - Build Command: `npm install --include=dev && npm run build`
 - Start Command: `npm start`
-- 環境変数: `DATABASE_URL`（Neon または Render Postgres の接続URL）
+- 環境変数: `DATABASE_URL`（Neon または Render Postgres の接続URL）、`ANTHROPIC_API_KEY`（OCR用）
 - ※ `NODE_ENV=production` は設定不要（SSL は接続先ホストで自動判定）。設定するとビルド時に devDependencies が入らず失敗するので注意。
 
 ## ディレクトリ構成

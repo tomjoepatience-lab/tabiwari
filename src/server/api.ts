@@ -1,8 +1,22 @@
 import { Router } from 'express';
 import { pool } from './db';
 import { summarize, CalcReceipt } from './calc';
+import { extractReceipt } from './ocr';
 
 export const api = Router();
+
+// ---- レシートOCR（Claude vision で明細抽出） -------------------------
+api.post('/ocr', async (req, res) => {
+  const { image } = req.body ?? {};
+  if (typeof image !== 'string' || !image) {
+    return res.status(400).json({ error: 'image（レシート画像）は必須です' });
+  }
+  try {
+    res.json(await extractReceipt(image));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
 
 // ---- 旅行 -------------------------------------------------------------
 
