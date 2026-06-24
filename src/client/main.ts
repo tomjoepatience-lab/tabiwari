@@ -289,6 +289,8 @@ async function renderTrip(id: number) {
 }
 
 function renderPanel(d: TripDetail, panel: HTMLElement, nameOf: (id: number | null) => string) {
+  // タブ切替・再描画のたびに先頭へ（前タブで下までスクロールしていても新タブが見えるように）
+  window.scrollTo({ top: 0 });
   // タブ切替で前タブのグラフ・地図を破棄（route() はナビ時のみ破棄するため）
   charts.forEach((c) => c.destroy());
   charts = [];
