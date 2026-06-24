@@ -1,6 +1,7 @@
-import { api, Member, Receipt, TripDetail } from './api';
+import { api, Group, Member, ProjectKind, Receipt, Trip, TripDetail, User } from './api';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
+import { openAlbum } from './album';
 
 declare const L: any;
 declare const Chart: any;
@@ -12,7 +13,9 @@ const app = () => document.getElementById('app')!;
 
 let charts: any[] = [];
 let mapInstance: any = null;
-let tripTab: 'memory' | 'map' | 'list' = 'memory';
+let tripTab: 'memory' | 'map' | 'list' | 'analytics' = 'memory';
+let currentUser: User | null = null;
+let myGroups: Group[] = [];
 
 // --- DOM ヘルパー -----------------------------------------------------
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -42,57 +45,137 @@ async function route() {
   }
 }
 
-// --- ホーム -----------------------------------------------------------
-async function renderHome() {
-  const trips = await api.listTrips();
-
-  const form = el('form', { class: 'card' }, [
-    el('h2', { textContent: '新しい旅行' }),
-    el('div', { class: 'row' }, [
-      el('input', { name: 'title', placeholder: '旅行・イベント名（例: 沖縄2泊3日）', required: true }),
-      el('input', { name: 'start_date', type: 'date' }),
-      el('input', { name: 'end_date', type: 'date' }),
-      el('button', { type: 'submit', textContent: '作成' }),
-    ]),
+// --- ダッシュボード ---------------------------------------------------
+function projectCard(t: Trip) {
+  const meta = t.kind === 'daily' ? '日常（普段使い）' : (dateRange(t.start_date, t.end_date) || '日付未設定');
+  return el('a', { class: 'card trip-card', href: `#/trip/${t.id}` }, [
+    el('div', { class: 'trip-title', textContent: t.title }),
+    el('div', { class: 'trip-total', textContent: yen(t.total ?? 0) }),
+    el('div', { class: 'muted', textContent: meta }),
   ]);
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = new FormData(form);
-    await api.createTrip({ title: String(f.get('title')), start_date: String(f.get('start_date') || ''), end_date: String(f.get('end_date') || '') });
-    await renderHome();
+}
+
+// グループ管理（一覧・作成・招待コードで参加）
+function groupsCard(groups: Group[]) {
+  const list = groups.length
+    ? el('ul', { class: 'group-list' }, groups.map((g) =>
+        el('li', {}, [
+          el('strong', { textContent: g.name }),
+          el('span', { class: 'muted', textContent: ` ・ メンバー${g.members ?? '-'}人 ・ 招待コード ` }),
+          el('code', { class: 'invite', textContent: g.invite_code }),
+        ])
+      ))
+    : el('p', { class: 'muted', textContent: 'まだグループがありません。作成するか、家族からもらった招待コードで参加してください。' });
+
+  const newName = el('input', { placeholder: '例: 我が家' });
+  const createBtn = el('button', { type: 'button', class: 'primary', textContent: '作成' });
+  createBtn.addEventListener('click', async () => {
+    if (!newName.value.trim()) return alert('グループ名を入力してください。');
+    try { await api.createGroup(newName.value.trim()); await renderHome(); } catch (e) { alert((e as Error).message); }
+  });
+  const code = el('input', { placeholder: '招待コード' });
+  const joinBtn = el('button', { type: 'button', textContent: '参加' });
+  joinBtn.addEventListener('click', async () => {
+    if (!code.value.trim()) return alert('招待コードを入力してください。');
+    try { await api.joinGroup(code.value.trim()); await renderHome(); } catch (e) { alert((e as Error).message); }
   });
 
-  const list = el('div', { class: 'trip-grid' },
-    trips.length
-      ? trips.map((t) =>
-          el('a', { class: 'card trip-card', href: `#/trip/${t.id}` }, [
-            el('div', { class: 'trip-title', textContent: t.title }),
-            el('div', { class: 'trip-total', textContent: yen(t.total ?? 0) }),
-            el('div', { class: 'muted', textContent: dateRange(t.start_date, t.end_date) }),
-          ])
-        )
-      : [el('p', { class: 'muted', textContent: 'まだ旅行がありません。下のフォームから作成してください。' })]
+  return el('section', { class: 'card' }, [
+    el('h2', { textContent: '👪 グループ（家族の共有単位）' }),
+    list,
+    el('div', { class: 'row' }, [labeled('新規グループを作る', newName), createBtn]),
+    el('div', { class: 'row' }, [labeled('招待コードで参加', code), joinBtn]),
+  ]);
+}
+
+async function renderHome() {
+  const [projects, groups] = await Promise.all([api.listTrips(), api.listGroups()]);
+  myGroups = groups;
+  const trips = projects.filter((p) => p.kind !== 'daily');
+  const dailies = projects.filter((p) => p.kind === 'daily');
+
+  // ユーザーバー
+  const logout = el('button', { class: 'link-btn', textContent: 'ログアウト' });
+  logout.addEventListener('click', async () => { await api.logout(); currentUser = null; myGroups = []; renderAuth(); });
+  const userbar = el('div', { class: 'row between userbar' }, [
+    el('span', { class: 'muted', textContent: `👤 ${currentUser?.username ?? ''}` }),
+    logout,
+  ]);
+
+  // 新規プロジェクト作成フォーム（グループ必須・種類で日付欄を出し分け）
+  let form: HTMLElement;
+  if (!groups.length) {
+    form = el('section', { class: 'card' }, [
+      el('h2', { textContent: '新しいプロジェクト' }),
+      el('p', { class: 'muted', textContent: '先に上でグループを作成（または参加）してください。プロジェクトはグループに属します。' }),
+    ]);
+  } else {
+    const kindSel = el('select', { name: 'kind' }, [
+      el('option', { value: 'trip', textContent: '旅行・イベント' }),
+      el('option', { value: 'daily', textContent: '日常（普段使い）' }),
+    ]);
+    const groupSel = el('select', { name: 'group_id' }, groups.map((g) => el('option', { value: String(g.id), textContent: g.name })));
+    const title = el('input', { name: 'title', placeholder: '例: 沖縄2泊3日 ／ 我が家の家計簿', required: true });
+    const start = el('input', { name: 'start_date', type: 'date' });
+    const end = el('input', { name: 'end_date', type: 'date' });
+    const dateWrap = el('div', { class: 'row' }, [labeled('開始', start), labeled('終了', end)]);
+    const syncDates = () => { dateWrap.style.display = kindSel.value === 'daily' ? 'none' : 'flex'; };
+    kindSel.addEventListener('change', syncDates);
+    const f = el('form', { class: 'card' }, [
+      el('h2', { textContent: '新しいプロジェクト' }),
+      el('div', { class: 'row' }, [labeled('グループ', groupSel), labeled('種類', kindSel), labeled('名前', title)]),
+      dateWrap,
+      el('div', {}, [el('button', { type: 'submit', class: 'primary', textContent: '作成' })]),
+    ]);
+    syncDates();
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await api.createTrip({ title: title.value, kind: kindSel.value as ProjectKind, group_id: Number(groupSel.value), start_date: start.value, end_date: end.value });
+      await renderHome();
+    });
+    form = f;
+  }
+
+  const projectCardG = (t: Trip) => {
+    const card = projectCard(t);
+    if (t.group_name) card.append(el('div', { class: 'card-group', textContent: '👪 ' + t.group_name }));
+    return card;
+  };
+  const section = (label: string, items: Trip[], empty: string) =>
+    el('section', {}, [
+      el('h2', { textContent: label }),
+      items.length
+        ? el('div', { class: 'trip-grid' }, items.map(projectCardG))
+        : el('p', { class: 'muted', textContent: empty }),
+    ]);
+
+  const analysis = el('section', { class: 'card' }, [el('h2', { textContent: '統括（全プロジェクト横断）' }), el('p', { class: 'muted', textContent: '読み込み中…' })]);
+
+  app().replaceChildren(
+    userbar,
+    el('h1', { textContent: 'ダッシュボード' }),
+    groupsCard(groups),
+    section('🧳 旅行・イベント', trips, 'まだ旅行がありません。グループを選んで作成してください。'),
+    section('🏠 日常', dailies, 'まだ日常の家計簿がありません。種類で「日常」を選んで作成できます。'),
+    analysis,
+    form,
   );
-
-  const analysis = el('section', { class: 'card' }, [el('h2', { textContent: '分析（旅行横断）' }), el('p', { class: 'muted', textContent: '読み込み中…' })]);
-
-  app().replaceChildren(el('section', {}, [el('h1', { textContent: '旅行' }), list]), analysis, form);
   void renderAnalysis(analysis);
 }
 
 async function renderAnalysis(section: HTMLElement) {
   const a = await api.analytics();
   if (!a.byCategory.length) {
-    section.replaceChildren(el('h2', { textContent: '分析（旅行横断）' }), el('p', { class: 'muted', textContent: 'データがまだありません。' }));
+    section.replaceChildren(el('h2', { textContent: '統括（全プロジェクト横断）' }), el('p', { class: 'muted', textContent: 'データがまだありません。' }));
     return;
   }
   const cat = el('canvas');
   const trip = el('canvas');
   section.replaceChildren(
-    el('h2', { textContent: '分析（旅行横断）' }),
+    el('h2', { textContent: '統括（全プロジェクト横断）' }),
     el('div', { class: 'charts' }, [
       el('div', { class: 'chart-box' }, [el('h3', { textContent: 'カテゴリ別' }), cat]),
-      el('div', { class: 'chart-box' }, [el('h3', { textContent: '旅行別' }), trip]),
+      el('div', { class: 'chart-box' }, [el('h3', { textContent: 'プロジェクト別' }), trip]),
     ])
   );
   const colors = ['#534ab7', '#1d9e75', '#d85a30', '#378add', '#ba7517', '#999'];
@@ -113,15 +196,32 @@ async function renderTrip(id: number) {
   const d = await api.getTrip(id);
   const nameOf = (mid: number | null) => d.members.find((m) => m.id === mid)?.name ?? '—';
 
-  const header = el('div', { class: 'trip-header' }, [
-    el('a', { class: 'back', href: '#/', textContent: '← 旅行一覧' }),
+  const isTrip = d.trip.kind !== 'daily';
+
+  const headerMain = el('div', { class: 'trip-header-main' }, [
     el('h1', { textContent: d.trip.title }),
-    el('div', { class: 'muted', textContent: `${dateRange(d.trip.start_date, d.trip.end_date)} ・ 合計 ${yen(d.summary.total)}` }),
+    el('div', { class: 'muted', textContent: isTrip
+      ? `${dateRange(d.trip.start_date, d.trip.end_date)} ・ 合計 ${yen(d.summary.total)}`
+      : `日常（普段使い）・ 合計 ${yen(d.summary.total)}` }),
   ]);
+  const headerChildren: (Node | string)[] = [
+    el('a', { class: 'back', href: '#/', textContent: '← ダッシュボード' }),
+    headerMain,
+  ];
+  if (isTrip) {
+    const albumBtn = el('button', { class: 'album-open-btn', textContent: '📖 アルバム' });
+    albumBtn.addEventListener('click', () => openAlbum(d));
+    headerChildren.push(albumBtn);
+  }
+  const header = el('div', { class: 'trip-header' }, headerChildren);
 
   const tabs = el('div', { class: 'tabs' });
   const panel = el('div', { class: 'panel' });
-  const tabDefs: [typeof tripTab, string][] = [['memory', '思い出'], ['map', '地図'], ['list', 'リスト']];
+  // 旅行は思い出/地図/リスト、日常はリスト＋月次・カテゴリ分析（割り勘・集計は両方で使える）
+  const tabDefs: [typeof tripTab, string][] = isTrip
+    ? [['memory', '思い出'], ['map', '地図'], ['list', 'リスト']]
+    : [['list', 'リスト'], ['analytics', '月次・カテゴリ']];
+  if (!tabDefs.some(([k]) => k === tripTab)) tripTab = tabDefs[0][0];
   const drawTabs = () => {
     tabs.replaceChildren(...tabDefs.map(([key, label]) => {
       const b = el('button', { class: 'tab' + (tripTab === key ? ' active' : ''), textContent: label });
@@ -136,9 +236,48 @@ async function renderTrip(id: number) {
 }
 
 function renderPanel(d: TripDetail, panel: HTMLElement, nameOf: (id: number | null) => string) {
-  if (tripTab === 'memory') panel.replaceChildren(memoryGrid(d, nameOf));
+  // タブ切替で前タブのグラフを破棄（route() はナビ時のみ破棄するため）
+  charts.forEach((c) => c.destroy());
+  charts = [];
+  if (tripTab === 'memory') panel.replaceChildren(memoryTab(d));
   else if (tripTab === 'list') panel.replaceChildren(receiptList(d, nameOf));
+  else if (tripTab === 'analytics') renderProjectAnalytics(d, panel);
   else { panel.replaceChildren(el('div', { class: 'map', id: 'trip-map' })); initMap(d, nameOf); }
+}
+
+// 日常プロジェクトの月次推移＋カテゴリ別（このプロジェクトのレシートから集計）
+function renderProjectAnalytics(d: TripDetail, panel: HTMLElement) {
+  if (!d.receipts.length) {
+    panel.replaceChildren(el('p', { class: 'muted', textContent: 'まだレシートがありません。リストタブから追加してください。' }));
+    return;
+  }
+  const byMonth = new Map<string, number>();
+  const byCat = new Map<string, number>();
+  for (const r of d.receipts) {
+    const m = (r.purchased_on || '').slice(0, 7);
+    if (m) byMonth.set(m, (byMonth.get(m) ?? 0) + r.total);
+    const c = r.category || '未分類';
+    byCat.set(c, (byCat.get(c) ?? 0) + r.total);
+  }
+  const months = [...byMonth.keys()].sort();
+  const cats = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
+  const monthCv = el('canvas');
+  const catCv = el('canvas');
+  panel.replaceChildren(el('div', { class: 'charts' }, [
+    el('div', { class: 'chart-box' }, [el('h3', { textContent: '月次推移' }), monthCv]),
+    el('div', { class: 'chart-box' }, [el('h3', { textContent: 'カテゴリ別' }), catCv]),
+  ]));
+  const colors = ['#534ab7', '#1d9e75', '#d85a30', '#378add', '#ba7517', '#999'];
+  charts.push(new Chart(monthCv, {
+    type: 'bar',
+    data: { labels: months.map((m) => m.replace('-', '/')), datasets: [{ data: months.map((m) => byMonth.get(m)), backgroundColor: '#534ab7' }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+  }));
+  charts.push(new Chart(catCv, {
+    type: 'doughnut',
+    data: { labels: cats.map((e) => e[0]), datasets: [{ data: cats.map((e) => e[1]), backgroundColor: colors }] },
+    options: { plugins: { legend: { position: 'bottom' } } },
+  }));
 }
 
 function membersCard(d: TripDetail) {
@@ -171,23 +310,54 @@ function summaryCard(d: TripDetail, nameOf: (id: number | null) => string) {
   return el('section', { class: 'card' }, [el('h2', { textContent: '集計・精算' }), table, el('h3', { textContent: '精算（誰が誰にいくら）' }), settle]);
 }
 
-// --- 思い出タブ（写真カード） -----------------------------------------
-function memoryGrid(d: TripDetail, nameOf: (id: number | null) => string) {
-  if (!d.receipts.length) return el('p', { class: 'muted', textContent: 'まだレシートがありません。' });
-  return el('div', { class: 'memory-grid' }, d.receipts.map((r) => {
-    const thumb = r.has_photo
-      ? el('img', { class: 'thumb', src: api.photoUrl(r.id), loading: 'lazy', alt: r.store_name || '' })
-      : el('div', { class: 'thumb placeholder', textContent: '🧾' });
-    const card = el('div', { class: 'memory-card' }, [
-      thumb,
-      el('div', { class: 'memory-body' }, [
-        el('div', { class: 'memory-store', textContent: r.store_name || '(店名なし)' }),
-        el('div', { class: 'memory-meta' }, [el('span', { class: 'chip sm', textContent: r.category || '未分類' }), el('strong', { textContent: yen(r.total) })]),
-      ]),
-    ]);
-    card.addEventListener('click', () => openModal(d, r, nameOf));
-    return card;
-  }));
+// --- 思い出タブ（思い出写真の管理＝アップロード＋グリッド） ------------
+// レシートとは別。ここに貯めた写真だけがアルバムの素材になる。
+function memoryTab(d: TripDetail) {
+  let photoData: string | null = null;
+  const fileInput = el('input', { type: 'file', accept: 'image/*' });
+  const preview = el('img', { class: 'preview', style: 'display:none' as any });
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    photoData = await resizeImage(file);
+    preview.src = photoData;
+    preview.style.display = 'block';
+  });
+  const caption = el('input', { name: 'caption', placeholder: 'ひとこと（任意）' });
+  const date = el('input', { name: 'taken_on', type: 'date' });
+  const form = el('form', { class: 'card' }, [
+    el('h3', { textContent: '思い出写真を追加' }),
+    el('div', { class: 'row' }, [labeled('写真', fileInput), labeled('撮影日', date)]),
+    labeled('キャプション', caption),
+    preview,
+    el('div', {}, [el('button', { type: 'submit', class: 'primary', textContent: '追加' })]),
+  ]);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!photoData) return alert('写真を選んでください。');
+    await api.addTripPhoto(d.trip.id, { photo: photoData, caption: caption.value, taken_on: date.value });
+    await renderTrip(d.trip.id);
+  });
+
+  const grid = d.photos.length
+    ? el('div', { class: 'photo-grid' }, d.photos.map((p) => {
+        const img = el('img', { class: 'photo-thumb', src: api.tripPhotoUrl(p.id), loading: 'lazy', alt: p.caption || '' });
+        img.addEventListener('click', () => openAlbum(d));
+        const del = el('button', { class: 'photo-del', textContent: '✕', title: '削除' });
+        del.addEventListener('click', async () => {
+          if (!confirm('この写真を削除しますか？')) return;
+          await api.deleteTripPhoto(p.id);
+          await renderTrip(d.trip.id);
+        });
+        return el('div', { class: 'photo-item' }, [img, del,
+          p.caption ? el('div', { class: 'photo-cap', textContent: p.caption }) : el('span')]);
+      }))
+    : el('p', { class: 'muted', textContent: 'まだ思い出写真がありません。下から追加すると「📖 アルバム」にまとまります。' });
+
+  const head = el('div', { class: 'row between' }, [
+    el('span', { class: 'muted', textContent: `${d.photos.length} 枚の思い出写真` }),
+  ]);
+  return el('div', {}, [head, grid, form]);
 }
 
 // --- リストタブ -------------------------------------------------------
@@ -201,6 +371,9 @@ function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
       await api.deleteReceipt(r.id);
       await renderTrip(d.trip.id);
     });
+    const thumb = r.has_photo
+      ? el('img', { class: 'receipt-thumb', src: api.photoUrl(r.id), loading: 'lazy', alt: r.store_name || '' })
+      : el('div', { class: 'receipt-thumb placeholder', textContent: '🧾' });
     const head = el('div', { class: 'receipt-head' }, [
       el('strong', { textContent: r.store_name || '(店名なし)' }),
       el('span', { class: 'chip sm', textContent: r.category || '未分類' }),
@@ -209,12 +382,15 @@ function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
       el('strong', { textContent: yen(r.total) }),
       del,
     ]);
-    return el('div', { class: 'receipt' }, [
+    const body = el('div', { class: 'receipt-body' }, [
       head,
       el('ul', { class: 'items' }, r.items.map((it) =>
         el('li', {}, [`${it.name} `, el('span', { class: 'muted', textContent: yen(it.price) }), el('span', { class: 'share', textContent: ' 負担: ' + (it.member_ids.map(nameOf).join('・') || '—') })])
       )),
     ]);
+    const card = el('div', { class: 'receipt' }, [thumb, body]);
+    thumb.addEventListener('click', () => openModal(d, r, nameOf));
+    return card;
   }));
 }
 
@@ -421,5 +597,56 @@ function dateRange(a: string | null, b: string | null) {
   return [a, b].filter(Boolean).map((x) => fmtDate(String(x))).join(' – ');
 }
 
-window.addEventListener('hashchange', route);
-route();
+// --- 認証ゲート -------------------------------------------------------
+function renderAuth() {
+  let mode: 'login' | 'register' = 'login';
+  const username = el('input', { name: 'username', placeholder: 'ユーザー名', autocomplete: 'username' });
+  const password = el('input', { name: 'password', type: 'password', placeholder: 'パスワード', autocomplete: 'current-password' });
+  const errBox = el('p', { class: 'status err', style: 'display:none' as any });
+  const submit = el('button', { type: 'submit', class: 'primary', textContent: 'ログイン' });
+  const toggle = el('button', { type: 'button', class: 'link-btn', textContent: 'アカウントを作る' });
+  const heading = el('h2', { textContent: 'ログイン' });
+
+  const setMode = (m: 'login' | 'register') => {
+    mode = m;
+    heading.textContent = submit.textContent = m === 'login' ? 'ログイン' : '新規登録';
+    toggle.textContent = m === 'login' ? 'アカウントを作る' : 'ログインに戻る';
+    errBox.style.display = 'none';
+  };
+  toggle.addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
+
+  const form = el('form', { class: 'card auth-card' }, [
+    heading,
+    el('p', { class: 'muted', textContent: '家族でグループを共有して、旅行も日常も一緒に記録できます。' }),
+    labeled('ユーザー名', username),
+    labeled('パスワード', password),
+    errBox,
+    el('div', { class: 'row between' }, [toggle, submit]),
+  ]);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errBox.style.display = 'none';
+    try {
+      const res = mode === 'login'
+        ? await api.login({ username: username.value, password: password.value })
+        : await api.register({ username: username.value, password: password.value });
+      currentUser = res.user;
+      await boot();
+    } catch (err) {
+      errBox.textContent = (err as Error).message;
+      errBox.style.display = 'block';
+    }
+  });
+  app().replaceChildren(el('section', { class: 'auth-wrap' }, [form]));
+}
+
+async function boot() {
+  const me = await api.me().catch(() => null);
+  if (!me) { currentUser = null; renderAuth(); return; }
+  currentUser = me.user;
+  myGroups = me.groups;
+  route();
+}
+
+window.addEventListener('hashchange', () => { if (currentUser) route(); });
+boot();

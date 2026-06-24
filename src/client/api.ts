@@ -1,6 +1,10 @@
 // サーバー API を叩く薄いラッパー
 
-export type Trip = { id: number; title: string; start_date: string | null; end_date: string | null; total?: number };
+export type ProjectKind = 'trip' | 'daily';
+export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: number; group_name?: string; start_date: string | null; end_date: string | null; total?: number };
+export type User = { id: number; username: string };
+export type Group = { id: number; name: string; invite_code: string; role: string; members?: number };
+export type Me = { user: User; groups: Group[] };
 export type Member = { id: number; name: string };
 export type Item = { id: number; name: string; price: number; quantity: number; member_ids: number[] };
 export type Receipt = {
@@ -20,12 +24,14 @@ export type Analytics = {
   byCategory: { category: string; total: number }[];
   byTrip: { title: string; total: number }[];
 };
+export type TripPhoto = { id: number; caption: string | null; taken_on: string | null; sort_order: number };
 export type PerMember = { memberId: number; name: string; paid: number; owed: number; net: number };
 export type Transfer = { from: number; to: number; amount: number };
 export type TripDetail = {
   trip: Trip;
   members: Member[];
   receipts: Receipt[];
+  photos: TripPhoto[];
   summary: { total: number; perMember: PerMember[]; settlement: Transfer[] };
 };
 
@@ -38,9 +44,26 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
+  // 認証・グループ
+  me: async (): Promise<Me | null> => {
+    const r = await fetch('/api/auth/me');
+    if (r.status === 401) return null;
+    return json<Me>(r);
+  },
+  register: (body: { username: string; password: string }) =>
+    fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
+  login: (body: { username: string; password: string }) =>
+    fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
+  logout: () => fetch('/api/auth/logout', { method: 'POST' }),
+  listGroups: () => fetch('/api/groups').then((r) => json<Group[]>(r)),
+  createGroup: (name: string) =>
+    fetch('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Group>(r)),
+  joinGroup: (invite_code: string) =>
+    fetch('/api/groups/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite_code }) }).then((r) => json<Group>(r)),
+
   listTrips: () => fetch('/api/trips').then((r) => json<Trip[]>(r)),
   getTrip: (id: number) => fetch(`/api/trips/${id}`).then((r) => json<TripDetail>(r)),
-  createTrip: (body: { title: string; start_date?: string; end_date?: string }) =>
+  createTrip: (body: { title: string; kind?: ProjectKind; group_id: number; start_date?: string; end_date?: string }) =>
     fetch('/api/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Trip>(r)),
   addMember: (tripId: number, name: string) =>
     fetch(`/api/trips/${tripId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Member>(r)),
@@ -49,4 +72,9 @@ export const api = {
   deleteReceipt: (id: number) => fetch(`/api/receipts/${id}`, { method: 'DELETE' }),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
+  // 思い出写真
+  addTripPhoto: (tripId: number, body: { photo: string; caption?: string; taken_on?: string }) =>
+    fetch(`/api/trips/${tripId}/photos`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<TripPhoto>(r)),
+  deleteTripPhoto: (id: number) => fetch(`/api/trip-photos/${id}`, { method: 'DELETE' }),
+  tripPhotoUrl: (id: number) => `/api/trip-photos/${id}/photo`,
 };

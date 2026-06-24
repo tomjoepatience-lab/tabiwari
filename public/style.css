@@ -94,8 +94,12 @@ button.primary:hover { filter: brightness(1.08); }
 .trip-total { font-size: 20px; font-weight: 700; color: var(--accent); }
 
 /* 旅行詳細 */
-.trip-header .back { font-size: 13px; color: var(--accent); text-decoration: none; }
+.trip-header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "back back" "main album"; align-items: center; column-gap: 12px; }
+.trip-header .back { grid-area: back; font-size: 13px; color: var(--accent); text-decoration: none; }
+.trip-header-main { grid-area: main; }
 .trip-header h1 { margin: 6px 0 2px; }
+.album-open-btn { grid-area: album; align-self: center; background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 9px 16px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.album-open-btn:hover { filter: brightness(1.05); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .chip { background: var(--accent-weak); color: var(--accent); border-radius: 999px; padding: 3px 12px; font-size: 13px; }
@@ -117,8 +121,11 @@ button.primary:hover { filter: brightness(1.08); }
 .check { font-size: 13px; white-space: nowrap; }
 
 /* レシート一覧 */
-.receipt { padding: 10px 0; border-bottom: 1px solid #f0f0ee; }
+.receipt { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0ee; }
 .receipt:last-child { border-bottom: none; }
+.receipt-body { flex: 1; min-width: 0; }
+.receipt-thumb { width: 56px; height: 56px; flex: 0 0 56px; object-fit: cover; border-radius: 8px; background: #f1f0eb; cursor: pointer; }
+.receipt-thumb.placeholder { display: flex; align-items: center; justify-content: center; font-size: 26px; cursor: default; }
 .receipt-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .items { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
 .items li { margin: 2px 0; }
@@ -136,15 +143,24 @@ button.primary:hover { filter: brightness(1.08); }
 .tab:hover { background: none; color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
-/* 思い出グリッド */
-.memory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.memory-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; }
-.memory-card:hover { border-color: var(--accent); }
-.thumb { width: 100%; height: 110px; object-fit: cover; display: block; background: #f1f0eb; }
-.thumb.placeholder { display: flex; align-items: center; justify-content: center; font-size: 36px; }
-.memory-body { padding: 8px 10px; }
-.memory-store { font-weight: 600; font-size: 14px; }
-.memory-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+/* 認証・グループ */
+.auth-wrap { max-width: 420px; margin: 40px auto; }
+.auth-card h2 { font-size: 20px; }
+.userbar { padding: 4px 0; }
+.group-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.group-list li { padding: 6px 0; border-bottom: 1px solid #f0f0ee; font-size: 14px; }
+.group-list li:last-child { border-bottom: none; }
+.invite { background: var(--accent-weak); color: var(--accent); padding: 1px 8px; border-radius: 6px; font-size: 13px; user-select: all; }
+.card-group { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* 思い出写真グリッド */
+.row.between { justify-content: space-between; align-items: center; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.photo-item { position: relative; border-radius: 10px; overflow: hidden; background: #fff; border: 1px solid var(--border); }
+.photo-thumb { width: 100%; height: 130px; object-fit: cover; display: block; background: #f1f0eb; cursor: pointer; }
+.photo-del { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 999px; border: none; background: rgba(0,0,0,0.55); color: #fff; font-size: 13px; cursor: pointer; line-height: 1; }
+.photo-del:hover { background: rgba(0,0,0,0.8); }
+.photo-cap { padding: 6px 8px; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 地図 */
 .map { height: 360px; border-radius: 10px; overflow: hidden; }
@@ -186,10 +202,104 @@ button.primary:hover { filter: brightness(1.08); }
   .table th, .table td { padding: 5px 4px; }
 
   .trip-grid { grid-template-columns: 1fr 1fr; }
-  .memory-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .photo-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .charts { grid-template-columns: 1fr; }
   .map { height: 300px; }
 
   .overlay { padding: 10px; }
   .tab { padding: 8px 12px; }
+}
+
+/* ===== 思い出アルバム（スクラップブック・ビューア） ===== */
+.album-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: #2b2925;
+  display: flex; flex-direction: column;
+}
+.album-top {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; background: rgba(0,0,0,0.25);
+  color: #fff; flex: 0 0 auto;
+}
+.album-close { background: none; border: none; color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
+.album-title { flex: 1; text-align: center; font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album-top-spacer { width: 56px; }
+
+/* ページ送り（横スクロール＋スナップ） */
+.album-pages {
+  flex: 1; min-height: 0;
+  display: flex; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.album-pages::-webkit-scrollbar { display: none; }
+.album-loading { margin: auto; color: #cfcabd; }
+
+.album-page {
+  flex: 0 0 100%; width: 100%; height: 100%;
+  scroll-snap-align: center; scroll-snap-stop: always;
+  position: relative; overflow: hidden;
+}
+
+/* 記録ページ（台紙クリーム） */
+.album-leaf {
+  background: #fbf8f1;
+  display: flex; flex-direction: column;
+  padding: 20px; max-width: 760px; margin: 0 auto;
+}
+.album-area { position: relative; flex: 1; min-height: 0; margin: 0 auto; width: 100%; max-width: 520px; }
+.album-slot { position: absolute; padding: 6px; display: flex; align-items: center; justify-content: center; }
+/* 白フチのプリント */
+.album-print {
+  max-width: 100%; max-height: 100%;
+  background: #fff; padding: 8px; border-radius: 3px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+  display: flex;
+}
+.album-img { width: 100%; height: 100%; object-fit: cover; border-radius: 2px; display: block; background: #efeae0; }
+
+/* 写真なしページ */
+.album-textcard {
+  position: absolute; inset: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff; border: 2px solid #e7e1d4; border-radius: 12px;
+}
+.album-cat-icon { font-size: 72px; }
+
+.album-footer { flex: 0 0 auto; padding-top: 14px; }
+.album-meta-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.album-place { font-size: 18px; font-weight: 800; color: #2b2925; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.album-amount { font-size: 19px; font-weight: 800; color: var(--accent); }
+.album-date { font-size: 12px; color: #8a857a; margin-top: 2px; }
+.album-caption { font-size: 15px; font-style: italic; color: #2b2925; margin-top: 8px; }
+
+/* 表紙 */
+.album-cover { background: #3a3a3a; }
+.album-cover-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.album-cover-plain { background: linear-gradient(135deg, #4b4690, #2b2925); }
+.album-cover-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.album-cover-plate { border: 2px solid rgba(255,255,255,0.85); padding: 28px 30px; text-align: center; max-width: 80%; }
+.album-cover-title { font-size: 30px; font-weight: 800; color: #fff; letter-spacing: 1px; }
+.album-cover-subtitle { font-size: 14px; color: #fff; margin-top: 12px; font-weight: 600; letter-spacing: 2px; }
+
+/* ナビ */
+.album-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 44px; border-radius: 999px; border: none;
+  background: rgba(0,0,0,0.45); color: #fff; font-size: 26px; line-height: 1;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 5;
+}
+.album-nav:hover { background: rgba(0,0,0,0.65); }
+.album-nav.prev { left: 12px; }
+.album-nav.next { right: 12px; }
+.album-counter {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 12px; font-weight: 700;
+  padding: 4px 12px; border-radius: 999px; z-index: 5;
+}
+
+@media (max-width: 600px) {
+  .album-nav { display: none; }
+  .album-leaf { padding: 16px; }
+  .album-cover-title { font-size: 24px; }
 }

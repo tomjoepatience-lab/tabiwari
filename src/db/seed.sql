@@ -2,11 +2,20 @@
 -- 実行例: psql "$DATABASE_URL" -f src/db/seed.sql
 -- RESTART IDENTITY で id を 1 から振り直すので、下の固定 id が常に一致する。
 
-TRUNCATE trips, members, receipts, items, item_shares RESTART IDENTITY CASCADE;
+TRUNCATE trips, members, receipts, items, item_shares,
+         users, user_groups, group_members, sessions RESTART IDENTITY CASCADE;
 
--- 旅行
-INSERT INTO trips (title, start_date, end_date) VALUES
-  ('沖縄2泊3日', '2026-06-01', '2026-06-03');           -- id=1
+-- デモユーザー（ログイン: demo / demo1234）とグループ
+INSERT INTO users (username, password_hash) VALUES
+  ('demo', '1ba586a11554060165dd3592939efa67:85b2e211ac6281a53434c1472a6fedc8e931b6b471dfa653751278f9ee647df9f76a256436cbcc6b01c298952419955f8a3f529995ebcb2a965acfc5e8b7c868'); -- id=1
+INSERT INTO user_groups (name, invite_code) VALUES
+  ('我が家', 'demo1234');                                -- id=1
+INSERT INTO group_members (group_id, user_id, role) VALUES
+  (1, 1, 'owner');
+
+-- 旅行（グループに属する）
+INSERT INTO trips (title, kind, group_id, start_date, end_date) VALUES
+  ('沖縄2泊3日', 'trip', 1, '2026-06-01', '2026-06-03');  -- id=1
 
 -- メンバー
 INSERT INTO members (trip_id, name) VALUES

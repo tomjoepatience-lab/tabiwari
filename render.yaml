@@ -1,0 +1,15 @@
+# Render Blueprint（New + → Blueprint でこの repo を選ぶと自動構成される）
+# 環境変数 DATABASE_URL / ANTHROPIC_API_KEY は秘密なので Render の画面で入力する（sync: false）。
+# ※ NODE_ENV=production は設定しない（設定すると build 時に devDeps が入らず失敗するため）。
+services:
+  - type: web
+    name: tabiwari
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

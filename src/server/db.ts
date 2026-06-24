@@ -22,6 +22,13 @@ export const pool = new Pool(
     : {}
 );
 
+// Neon 無料枠は無通信でサスペンドし、アイドル接続が切られることがある。
+// このイベントを拾わないと「Connection terminated unexpectedly」でプロセスごと落ちるので握りつぶす
+// （次回クエリでプールが新しい接続を張り直すため実害なし）。
+pool.on('error', (err) => {
+  console.error('pg pool idle client error（無視して継続）:', err.message);
+});
+
 // 接続できるかを返す（DB が無くてもサーバは起動させたいので、ここでは投げない）
 export async function checkDb(): Promise<boolean> {
   try {
