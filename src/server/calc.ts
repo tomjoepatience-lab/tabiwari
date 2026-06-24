@@ -1,6 +1,8 @@
 // 割り勘の集計・精算ロジック（DB に依存しない純粋関数。テストしやすい）
 
-export type CalcItem = { price: number; memberIds: number[] };
+// share.weight が null のときは members.weight を継承（明細ごとのオーバーライドが優先）
+export type CalcShare = { memberId: number; weight: number | null };
+export type CalcItem = { price: number; shares: CalcShare[] };
 export type CalcReceipt = { paidBy: number | null; items: CalcItem[] };
 export type CalcMember = { id: number; weight: number };
 
@@ -20,15 +22,18 @@ export function summarize(members: CalcMember[], receipts: CalcReceipt[]): Summa
     owed.set(id, 0);
   }
 
+  // share の実効比重: オーバーライド(weight) があればそれ、無ければ member 既定
+  const effW = (s: CalcShare) => (s.weight && s.weight > 0 ? s.weight : (weightOf.get(s.memberId) ?? 1));
+
   let total = 0;
   for (const r of receipts) {
     let receiptTotal = 0;
     for (const it of r.items) {
       receiptTotal += it.price;
-      // 負担者が空なら全員で割る（保険）。通常は入力時に1人以上指定される。
-      const sharers = it.memberIds.length > 0 ? it.memberIds : memberIds;
-      const sumW = sharers.reduce((s, m) => s + (weightOf.get(m) ?? 1), 0) || 1;
-      for (const m of sharers) owed.set(m, (owed.get(m) ?? 0) + it.price * (weightOf.get(m) ?? 1) / sumW);
+      // 負担者が空なら全員で等分（保険）。通常は入力時に1人以上指定される。
+      const shares: CalcShare[] = it.shares.length > 0 ? it.shares : memberIds.map((id) => ({ memberId: id, weight: null }));
+      const sumW = shares.reduce((s, sh) => s + effW(sh), 0) || 1;
+      for (const sh of shares) owed.set(sh.memberId, (owed.get(sh.memberId) ?? 0) + it.price * effW(sh) / sumW);
     }
     total += receiptTotal;
     if (r.paidBy != null) paid.set(r.paidBy, (paid.get(r.paidBy) ?? 0) + receiptTotal);

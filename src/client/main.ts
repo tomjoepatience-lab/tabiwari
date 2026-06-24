@@ -16,6 +16,7 @@ let mapInstance: any = null;
 let tripTab: 'memory' | 'map' | 'list' | 'analytics' = 'memory';
 let currentUser: User | null = null;
 let myGroups: Group[] = [];
+let editingReceiptId: number | null = null;
 
 // --- DOM ヘルパー -----------------------------------------------------
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -231,8 +232,10 @@ async function renderTrip(id: number) {
   };
   drawTabs();
 
-  app().replaceChildren(header, membersCard(d), summaryCard(d, nameOf), receiptForm(d), el('section', { class: 'card' }, [tabs, panel]));
+  const editing = editingReceiptId ? d.receipts.find((r) => r.id === editingReceiptId) : undefined;
+  app().replaceChildren(header, membersCard(d), summaryCard(d, nameOf), receiptForm(d, editing), el('section', { class: 'card' }, [tabs, panel]));
   renderPanel(d, panel, nameOf);
+  if (editing) document.getElementById('receipt-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderPanel(d: TripDetail, panel: HTMLElement, nameOf: (id: number | null) => string) {
@@ -245,12 +248,87 @@ function renderPanel(d: TripDetail, panel: HTMLElement, nameOf: (id: number | nu
   else { panel.replaceChildren(el('div', { class: 'map', id: 'trip-map' })); initMap(d, nameOf); }
 }
 
-// 日常プロジェクトの月次推移＋カテゴリ別（このプロジェクトのレシートから集計）
-function renderProjectAnalytics(d: TripDetail, panel: HTMLElement) {
-  if (!d.receipts.length) {
-    panel.replaceChildren(el('p', { class: 'muted', textContent: 'まだレシートがありません。リストタブから追加してください。' }));
-    return;
-  }
+// 日常プロジェクトの「月次・カテゴリ」タブ：月次予算＋繰り返し支出＋グラフ
+async function renderProjectAnalytics(d: TripDetail, panel: HTMLElement) {
+  const nameOf = (mid: number | null) => d.members.find((m) => m.id === mid)?.name ?? '—';
+  const thisMonth = new Date().toISOString().slice(0, 10).slice(0, 7);
+  panel.replaceChildren(budgetCard(d, thisMonth), await recurringCard(d, nameOf), chartsCard(d));
+}
+
+// 月次予算カード
+function budgetCard(d: TripDetail, thisMonth: string) {
+  const spent = d.receipts.filter((r) => (r.purchased_on || '').slice(0, 7) === thisMonth).reduce((s, r) => s + r.total, 0);
+  const budget = d.trip.monthly_budget ?? null;
+  const over = budget != null && spent > budget;
+  const pct = budget && budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+
+  const bar = el('div', { class: 'budget-bar' }, [el('div', { class: 'budget-fill' + (over ? ' over' : ''), style: `width:${pct}%` as any })]);
+  const summary = budget != null
+    ? el('p', {}, [`今月（${thisMonth.replace('-', '/')}）の支出 `, el('strong', { textContent: yen(spent) }), ` ／ 予算 ${yen(budget)} … `,
+        el('strong', { class: over ? 'neg' : 'pos', textContent: over ? `超過 ${yen(spent - budget)}` : `残り ${yen(budget - spent)}` })])
+    : el('p', { class: 'muted' }, [`今月（${thisMonth.replace('-', '/')}）の支出 `, el('strong', { textContent: yen(spent) }), '（予算は未設定）']);
+
+  const input = el('input', { type: 'number', min: '0', placeholder: '月次予算（円）', value: budget != null ? String(budget) : '', class: 'price' });
+  const save = el('button', { type: 'button', textContent: '予算を保存' });
+  save.addEventListener('click', async () => {
+    const v = input.value.trim() === '' ? null : Math.max(0, parseInt(input.value, 10) || 0);
+    await api.setBudget(d.trip.id, v);
+    await renderTrip(d.trip.id);
+  });
+
+  return el('section', { class: 'card' }, [
+    el('h3', { textContent: '今月の予算' }),
+    summary,
+    budget != null ? bar : el('span'),
+    el('div', { class: 'row' }, [labeled('月次予算', input), save]),
+  ]);
+}
+
+// 繰り返し支出カード（テンプレ管理＋今月分の一括計上）
+async function recurringCard(d: TripDetail, nameOf: (id: number | null) => string) {
+  const list = await api.listRecurring(d.trip.id).catch(() => []);
+
+  const rows = list.length
+    ? el('ul', { class: 'recurring-list' }, list.map((r) => {
+        const del = el('button', { class: 'link-btn', textContent: '削除' });
+        del.addEventListener('click', async () => { await api.deleteRecurring(r.id); await renderTrip(d.trip.id); });
+        return el('li', {}, [
+          el('strong', { textContent: r.name }),
+          el('span', { class: 'muted', textContent: ` ${yen(r.amount)}／月 ・ ${r.category || '未分類'} ・ 払: ${nameOf(r.paid_by)} ` }),
+          del,
+        ]);
+      }))
+    : el('p', { class: 'muted', textContent: '繰り返し支出（家賃・サブスク等）はまだありません。' });
+
+  const name = el('input', { placeholder: '例: 家賃' });
+  const amount = el('input', { type: 'number', min: '1', placeholder: '金額', class: 'price' });
+  const category = el('select', {}, CATEGORIES.map((c) => el('option', { value: c, textContent: c })));
+  const paidBy = el('select', {}, d.members.map((m) => el('option', { value: String(m.id), textContent: m.name })));
+  const add = el('button', { type: 'button', textContent: '追加' });
+  add.addEventListener('click', async () => {
+    if (!name.value.trim() || !(parseInt(amount.value, 10) > 0)) return alert('名前と金額を入力してください。');
+    await api.addRecurring(d.trip.id, { name: name.value.trim(), amount: parseInt(amount.value, 10), category: category.value, paid_by: Number(paidBy.value) });
+    await renderTrip(d.trip.id);
+  });
+
+  const gen = el('button', { type: 'button', class: 'primary', textContent: '今月分をまとめて計上' });
+  gen.addEventListener('click', async () => {
+    const res = await api.generateRecurring(d.trip.id);
+    alert(`${res.month.replace('-', '/')}: ${res.created}件を計上${res.skipped ? `（${res.skipped}件は計上済みのためスキップ）` : ''}`);
+    await renderTrip(d.trip.id);
+  });
+
+  return el('section', { class: 'card' }, [
+    el('h3', { textContent: '繰り返し支出（毎月）' }),
+    rows,
+    list.length ? el('div', {}, [gen]) : el('span'),
+    el('div', { class: 'row' }, [labeled('名前', name), labeled('金額', amount), labeled('カテゴリ', category), labeled('払う人', paidBy), add]),
+  ]);
+}
+
+// 月次推移＋カテゴリ別グラフ
+function chartsCard(d: TripDetail) {
+  if (!d.receipts.length) return el('p', { class: 'muted', textContent: 'まだレシートがありません。リストタブや繰り返し支出から追加してください。' });
   const byMonth = new Map<string, number>();
   const byCat = new Map<string, number>();
   for (const r of d.receipts) {
@@ -263,21 +341,25 @@ function renderProjectAnalytics(d: TripDetail, panel: HTMLElement) {
   const cats = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
   const monthCv = el('canvas');
   const catCv = el('canvas');
-  panel.replaceChildren(el('div', { class: 'charts' }, [
+  const card = el('section', { class: 'card' }, [el('div', { class: 'charts' }, [
     el('div', { class: 'chart-box' }, [el('h3', { textContent: '月次推移' }), monthCv]),
     el('div', { class: 'chart-box' }, [el('h3', { textContent: 'カテゴリ別' }), catCv]),
-  ]));
+  ])]);
   const colors = ['#534ab7', '#1d9e75', '#d85a30', '#378add', '#ba7517', '#999'];
-  charts.push(new Chart(monthCv, {
-    type: 'bar',
-    data: { labels: months.map((m) => m.replace('-', '/')), datasets: [{ data: months.map((m) => byMonth.get(m)), backgroundColor: '#534ab7' }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
-  }));
-  charts.push(new Chart(catCv, {
-    type: 'doughnut',
-    data: { labels: cats.map((e) => e[0]), datasets: [{ data: cats.map((e) => e[1]), backgroundColor: colors }] },
-    options: { plugins: { legend: { position: 'bottom' } } },
-  }));
+  // canvas は DOM 追加後に描画する（次のマイクロタスク）
+  Promise.resolve().then(() => {
+    charts.push(new Chart(monthCv, {
+      type: 'bar',
+      data: { labels: months.map((m) => m.replace('-', '/')), datasets: [{ data: months.map((m) => byMonth.get(m)), backgroundColor: '#534ab7' }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+    }));
+    charts.push(new Chart(catCv, {
+      type: 'doughnut',
+      data: { labels: cats.map((e) => e[0]), datasets: [{ data: cats.map((e) => e[1]), backgroundColor: colors }] },
+      options: { plugins: { legend: { position: 'bottom' } } },
+    }));
+  });
+  return card;
 }
 
 // 比率の表示用ラベル（例: 太郎 6 : 花子 4 ／ 全員同じなら「均等」）
@@ -394,6 +476,12 @@ function memoryTab(d: TripDetail) {
 function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
   if (!d.receipts.length) return el('p', { class: 'muted', textContent: 'まだレシートがありません。' });
   return el('div', {}, d.receipts.map((r) => {
+    const edit = el('button', { class: 'link-btn', textContent: '編集' });
+    edit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editingReceiptId = r.id;
+      renderTrip(d.trip.id);
+    });
     const del = el('button', { class: 'link-btn', textContent: '削除' });
     del.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -410,6 +498,7 @@ function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
       el('span', { class: 'muted', textContent: `${fmtDate(r.purchased_on)} ・ 払: ${nameOf(r.paid_by)}` }),
       el('span', { class: 'spacer' }),
       el('strong', { textContent: yen(r.total) }),
+      edit,
       del,
     ]);
     const body = el('div', { class: 'receipt-body' }, [
@@ -482,18 +571,19 @@ function receiptBreakdown(r: Receipt, members: Member[]) {
   return members.map((m) => ({ name: m.name, owed: Math.round(owed.get(m.id) ?? 0) })).filter((b) => b.owed > 0);
 }
 
-// --- レシート追加フォーム --------------------------------------------
-function receiptForm(d: TripDetail) {
-  if (!d.members.length) return el('section', { class: 'card' }, [el('h2', { textContent: 'レシートを追加' }), el('p', { class: 'muted', textContent: '先にメンバーを追加してください。' })]);
+// --- レシート追加／編集フォーム --------------------------------------
+function receiptForm(d: TripDetail, editing?: Receipt) {
+  if (!d.members.length) return el('section', { class: 'card', id: 'receipt-form' }, [el('h2', { textContent: 'レシートを追加' }), el('p', { class: 'muted', textContent: '先にメンバーを追加してください。' })]);
 
   let photoData: string | null = null;
   let coords: { lat: number; lng: number } | null = null;
 
   const itemsWrap = el('div', { class: 'item-rows' });
   const addRow = () => itemsWrap.append(itemRow(d.members));
-  const setItems = (drafts: { name: string; price: number }[]) =>
+  const setItems = (drafts: ItemDraft[]) =>
     itemsWrap.replaceChildren(...(drafts.length ? drafts.map((dr) => itemRow(d.members, dr)) : [itemRow(d.members)]));
-  addRow();
+  if (editing) setItems(editing.items.map((it) => ({ name: it.name, price: it.price, shares: it.shares })));
+  else addRow();
 
   // レシートOCR（Tesseract.js）。画像を写真として添付しつつ、明細の下書きを作る
   const ocrInput = el('input', { type: 'file', accept: 'image/*' });
@@ -521,14 +611,17 @@ function receiptForm(d: TripDetail) {
     }
   });
 
-  const store = el('input', { name: 'store_name', placeholder: '店名' });
+  const store = el('input', { name: 'store_name', placeholder: '店名', value: editing?.store_name ?? '' });
   const category = el('select', { name: 'category' }, CATEGORIES.map((c) => el('option', { value: c, textContent: c })));
-  const date = el('input', { name: 'purchased_on', type: 'date', required: true, value: new Date().toISOString().slice(0, 10) });
+  if (editing?.category) category.value = editing.category;
+  const date = el('input', { name: 'purchased_on', type: 'date', required: true, value: editing ? editing.purchased_on.slice(0, 10) : new Date().toISOString().slice(0, 10) });
   const paidBy = el('select', { name: 'paid_by' }, d.members.map((m) => el('option', { value: String(m.id), textContent: m.name })));
+  if (editing?.paid_by != null) paidBy.value = String(editing.paid_by);
 
   // 写真
   const photoInput = el('input', { type: 'file', accept: 'image/*' });
   const preview = el('img', { class: 'preview', style: 'display:none' as any });
+  if (editing?.has_photo) { preview.src = api.photoUrl(editing.id); preview.style.display = 'block'; }
   photoInput.addEventListener('change', async () => {
     const file = photoInput.files?.[0];
     if (!file) return;
@@ -560,42 +653,66 @@ function receiptForm(d: TripDetail) {
   const addItemBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 明細を追加' });
   addItemBtn.addEventListener('click', addRow);
 
-  const form = el('form', { class: 'card' }, [
-    el('h2', { textContent: 'レシートを追加' }),
+  const actions: (Node | string)[] = [el('button', { type: 'submit', class: 'primary', textContent: editing ? '更新' : '保存' })];
+  if (editing) {
+    const cancel = el('button', { type: 'button', class: 'link-btn', textContent: 'キャンセル' });
+    cancel.addEventListener('click', () => { editingReceiptId = null; renderTrip(d.trip.id); });
+    actions.push(cancel);
+  }
+
+  const form = el('form', { class: 'card', id: 'receipt-form' }, [
+    el('h2', { textContent: editing ? 'レシートを編集' : 'レシートを追加' }),
     el('div', { class: 'row' }, [labeled('店名', store), labeled('カテゴリ', category)]),
     el('div', { class: 'row' }, [labeled('日付', date), labeled('払った人', paidBy)]),
-    el('div', { class: 'row' }, [labeled('写真', photoInput), el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])])]),
+    el('div', { class: 'row' }, [labeled(editing ? '写真（変更する場合のみ）' : '写真', photoInput), el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])])]),
     el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: 'レシート読取（AIが明細を自動入力・写真も添付されます）' }), el('div', { class: 'row' }, [ocrInput, ocrStatus])]),
     preview,
-    el('h3', { textContent: '明細（商品ごとに負担者を選ぶ／OCRの下書きを修正）' }),
+    el('h3', { textContent: '明細（負担者を選ぶ／「この明細だけ比率を指定」で品目別の比重も設定可）' }),
     itemsWrap,
     addItemBtn,
-    el('div', {}, [el('button', { type: 'submit', class: 'primary', textContent: '保存' })]),
+    el('div', { class: 'row' }, actions),
   ]);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const items = [...itemsWrap.querySelectorAll('.item-row')].map((row) => ({
-      name: (row.querySelector('[name=item_name]') as HTMLInputElement).value.trim(),
-      price: parseInt((row.querySelector('[name=item_price]') as HTMLInputElement).value, 10),
-      member_ids: [...row.querySelectorAll('input[type=checkbox]:checked')].map((c) => Number((c as HTMLInputElement).value)),
-    })).filter((it) => it.name && it.price > 0);
+    const items = [...itemsWrap.querySelectorAll('.item-row')].map((row) => {
+      const override = (row.querySelector('.override-toggle') as HTMLInputElement)?.checked;
+      const shares = [...row.querySelectorAll('.check')]
+        .map((lbl) => ({
+          cb: lbl.querySelector('input[type=checkbox]') as HTMLInputElement,
+          wi: lbl.querySelector('.weight-mini') as HTMLInputElement,
+        }))
+        .filter((x) => x.cb.checked)
+        .map((x) => ({ member_id: Number(x.cb.value), weight: override ? Math.max(1, parseInt(x.wi.value, 10) || 1) : null }));
+      return {
+        name: (row.querySelector('[name=item_name]') as HTMLInputElement).value.trim(),
+        price: parseInt((row.querySelector('[name=item_price]') as HTMLInputElement).value, 10),
+        shares,
+      };
+    }).filter((it) => it.name && it.price > 0);
 
     if (!items.length) return alert('明細を1件以上入力してください（商品名と金額）。');
-    if (items.some((it) => it.member_ids.length === 0)) return alert('各明細に負担者を1人以上選んでください。');
+    if (items.some((it) => it.shares.length === 0)) return alert('各明細に負担者を1人以上選んでください。');
 
+    const body: any = {
+      store_name: store.value,
+      category: category.value,
+      purchased_on: date.value,
+      paid_by: Number(paidBy.value),
+      lat: coords?.lat ?? editing?.lat ?? null,
+      lng: coords?.lng ?? editing?.lng ?? null,
+      place_name: (store as any).dataset.place || editing?.place_name || null,
+      items,
+    };
     try {
-      await api.addReceipt(d.trip.id, {
-        store_name: store.value,
-        category: category.value,
-        purchased_on: date.value,
-        paid_by: Number(paidBy.value),
-        lat: coords?.lat ?? null,
-        lng: coords?.lng ?? null,
-        place_name: (store as any).dataset.place || null,
-        photo: photoData,
-        items,
-      });
+      if (editing) {
+        if (photoData) body.photo = photoData; // 新しい写真を選んだときだけ差し替え
+        await api.updateReceipt(editing.id, body);
+        editingReceiptId = null;
+      } else {
+        body.photo = photoData;
+        await api.addReceipt(d.trip.id, body);
+      }
       await renderTrip(d.trip.id);
     } catch (err) {
       alert((err as Error).message);
@@ -605,14 +722,30 @@ function receiptForm(d: TripDetail) {
   return form;
 }
 
-function itemRow(members: Member[], draft?: { name: string; price: number }) {
-  const checks = el('div', { class: 'checks' }, members.map((m) =>
-    el('label', { class: 'check' }, [el('input', { type: 'checkbox', value: String(m.id), checked: true }), ' ' + m.name])
-  ));
+type ItemDraft = { name: string; price: number; shares?: { member_id: number; weight: number | null }[] };
+
+function itemRow(members: Member[], draft?: ItemDraft) {
+  const sharesById = new Map((draft?.shares ?? []).map((s) => [s.member_id, s.weight]));
+  const hasDraftShares = !!draft?.shares;
+  const startOverride = !!draft?.shares?.some((s) => s.weight != null);
+  const weightInputs: HTMLInputElement[] = [];
+
+  const checks = el('div', { class: 'checks' }, members.map((m) => {
+    const checked = hasDraftShares ? sharesById.has(m.id) : true;
+    const cb = el('input', { type: 'checkbox', value: String(m.id), checked });
+    const w = el('input', { type: 'number', min: '1', class: 'weight-mini', value: String(sharesById.get(m.id) ?? m.weight), style: startOverride ? '' : ('display:none' as any) });
+    weightInputs.push(w);
+    return el('label', { class: 'check' }, [cb, ' ' + m.name, w]);
+  }));
+
+  const override = el('input', { type: 'checkbox', class: 'override-toggle', checked: startOverride });
+  override.addEventListener('change', () => weightInputs.forEach((w) => { w.style.display = override.checked ? '' : 'none'; }));
+
   return el('div', { class: 'item-row' }, [
     el('input', { name: 'item_name', placeholder: '商品名', class: 'grow', value: draft?.name ?? '' }),
-    el('input', { name: 'item_price', type: 'number', min: '1', placeholder: '金額', class: 'price', value: draft ? String(draft.price) : '' }),
+    el('input', { name: 'item_price', type: 'number', min: '1', placeholder: '金額', class: 'price', value: draft && draft.price ? String(draft.price) : '' }),
     checks,
+    el('label', { class: 'override-wrap' }, [override, ' この明細だけ比率を指定']),
   ]);
 }
 

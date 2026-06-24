@@ -46,6 +46,15 @@ async function memberAccessible(userId: number, memberId: number): Promise<boole
   );
   return rows.length > 0;
 }
+async function recurringAccessible(userId: number, recId: number): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM recurring_expenses re JOIN trips t ON t.id = re.trip_id
+       JOIN group_members gm ON gm.group_id = t.group_id
+      WHERE re.id = $1 AND gm.user_id = $2`,
+    [recId, userId]
+  );
+  return rows.length > 0;
+}
 // weight を 1以上の整数に丸める（不正値は 1）
 const normWeight = (w: unknown) => (Number.isInteger(w) && (w as number) > 0 ? (w as number) : 1);
 
@@ -181,24 +190,25 @@ api.get('/trips/:id', async (req, res) => {
 
   const sharesQ = itemIds.length
     ? await pool.query(
-        `SELECT item_id, member_id FROM item_shares WHERE item_id = ANY($1::int[])`,
+        `SELECT item_id, member_id, weight FROM item_shares WHERE item_id = ANY($1::int[])`,
         [itemIds]
       )
     : { rows: [] as any[] };
 
-  // item_id -> member_ids
-  const sharesByItem = new Map<number, number[]>();
+  // item_id -> shares（負担者＋比重オーバーライド）
+  const sharesByItem = new Map<number, { member_id: number; weight: number | null }[]>();
   for (const s of sharesQ.rows) {
     const arr = sharesByItem.get(s.item_id) ?? [];
-    arr.push(s.member_id);
+    arr.push({ member_id: s.member_id, weight: s.weight });
     sharesByItem.set(s.item_id, arr);
   }
 
-  // receipt_id -> items（負担者付き）
+  // receipt_id -> items（負担者付き）。member_ids は表示用、shares は比重付き。
   const itemsByReceipt = new Map<number, any[]>();
   for (const it of itemsQ.rows) {
     const arr = itemsByReceipt.get(it.receipt_id) ?? [];
-    arr.push({ ...it, member_ids: sharesByItem.get(it.id) ?? [] });
+    const shares = sharesByItem.get(it.id) ?? [];
+    arr.push({ ...it, shares, member_ids: shares.map((s) => s.member_id) });
     itemsByReceipt.set(it.receipt_id, arr);
   }
 
@@ -217,7 +227,7 @@ api.get('/trips/:id', async (req, res) => {
 
   const calcReceipts: CalcReceipt[] = receipts.map((r) => ({
     paidBy: r.paid_by,
-    items: r.items.map((it: any) => ({ price: it.price, memberIds: it.member_ids })),
+    items: r.items.map((it: any) => ({ price: it.price, shares: it.shares })),
   }));
   const summary = summarize(membersQ.rows.map((m) => ({ id: m.id, weight: m.weight })), calcReceipts);
 
@@ -266,7 +276,40 @@ api.put('/members/:id', async (req, res) => {
   res.json(rows[0]);
 });
 
-// ---- レシート（明細＋負担者をまとめて登録） --------------------------
+// ---- レシート（明細＋負担者＋比重をまとめて登録／編集） --------------
+
+function validateReceiptItems(items: any): string | null {
+  if (!Array.isArray(items) || items.length === 0) return '明細(items)を1件以上指定してください';
+  for (const it of items) {
+    if (!it || typeof it.name !== 'string' || !it.name) return '明細の name は必須です';
+    if (!Number.isInteger(it.price) || it.price <= 0) return '明細の price は正の整数で指定してください';
+  }
+  return null;
+}
+
+// items を items + item_shares として書き込む（shares=[{member_id, weight}] / 後方互換で member_ids: number[]）
+async function insertItemsAndShares(client: any, receiptId: number, items: any[]) {
+  for (const it of items) {
+    const itemQ = await client.query(
+      `INSERT INTO items (receipt_id, name, price, quantity) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [receiptId, it.name, it.price, it.quantity && it.quantity > 0 ? it.quantity : 1]
+    );
+    const itemId = itemQ.rows[0].id;
+    const shares: any[] = Array.isArray(it.shares)
+      ? it.shares
+      : Array.isArray(it.member_ids) ? it.member_ids.map((m: number) => ({ member_id: m, weight: null })) : [];
+    for (const s of shares) {
+      const mid = Number(s.member_id);
+      if (!Number.isInteger(mid)) continue;
+      const w = Number.isInteger(s.weight) && s.weight > 0 ? s.weight : null;
+      await client.query(
+        `INSERT INTO item_shares (item_id, member_id, weight) VALUES ($1,$2,$3)
+         ON CONFLICT (item_id, member_id) DO UPDATE SET weight = EXCLUDED.weight`,
+        [itemId, mid, w]
+      );
+    }
+  }
+}
 
 api.post('/trips/:id/receipts', async (req, res) => {
   const tripId = Number(req.params.id);
@@ -275,25 +318,10 @@ api.post('/trips/:id/receipts', async (req, res) => {
 
   const { store_name, category, purchased_on, paid_by, lat, lng, place_name, photo, items } = req.body ?? {};
   if (!purchased_on) return res.status(400).json({ error: 'purchased_on は必須です' });
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: '明細(items)を1件以上指定してください' });
-  }
-  for (const it of items) {
-    if (!it || typeof it.name !== 'string' || !it.name) {
-      return res.status(400).json({ error: '明細の name は必須です' });
-    }
-    if (!Number.isInteger(it.price) || it.price <= 0) {
-      return res.status(400).json({ error: '明細の price は正の整数で指定してください' });
-    }
-  }
+  const err = validateReceiptItems(items);
+  if (err) return res.status(400).json({ error: err });
 
-  // 写真は dataURL or 素の base64 で受け取り、Buffer にして BYTEA へ
-  let photoBuf: Buffer | null = null;
-  if (typeof photo === 'string' && photo) {
-    const base64 = photo.includes(',') ? photo.split(',')[1] : photo;
-    photoBuf = Buffer.from(base64, 'base64');
-  }
-
+  const photoBuf = decodePhoto(photo);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -303,24 +331,45 @@ api.post('/trips/:id/receipts', async (req, res) => {
       [tripId, store_name || null, category || null, purchased_on, paid_by || null, lat ?? null, lng ?? null, place_name || null, photoBuf]
     );
     const receiptId = receiptQ.rows[0].id;
-
-    for (const it of items) {
-      const itemQ = await client.query(
-        `INSERT INTO items (receipt_id, name, price, quantity) VALUES ($1,$2,$3,$4) RETURNING id`,
-        [receiptId, it.name, it.price, it.quantity && it.quantity > 0 ? it.quantity : 1]
-      );
-      const itemId = itemQ.rows[0].id;
-      const memberIds: number[] = Array.isArray(it.member_ids) ? it.member_ids : [];
-      for (const m of memberIds) {
-        await client.query(
-          `INSERT INTO item_shares (item_id, member_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [itemId, m]
-        );
-      }
-    }
-
+    await insertItemsAndShares(client, receiptId, items);
     await client.query('COMMIT');
     res.status(201).json({ id: receiptId });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
+  }
+});
+
+// レシート編集（フィールド＋明細＋負担者比重をまるごと差し替え）
+// photo: 未指定=既存維持 / null=削除 / 文字列=差し替え
+api.put('/receipts/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await receiptAccessible(uid(req), id))) return res.status(404).json({ error: 'not found' });
+
+  const body = req.body ?? {};
+  const { store_name, category, purchased_on, paid_by, lat, lng, place_name, items } = body;
+  if (!purchased_on) return res.status(400).json({ error: 'purchased_on は必須です' });
+  const err = validateReceiptItems(items);
+  if (err) return res.status(400).json({ error: err });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE receipts SET store_name=$2, category=$3, purchased_on=$4, paid_by=$5, lat=$6, lng=$7, place_name=$8 WHERE id=$1`,
+      [id, store_name || null, category || null, purchased_on, paid_by || null, lat ?? null, lng ?? null, place_name || null]
+    );
+    if ('photo' in body) {
+      // null=削除、文字列=差し替え（未指定なら触らない）
+      await client.query(`UPDATE receipts SET photo=$2 WHERE id=$1`, [id, decodePhoto(body.photo)]);
+    }
+    await client.query(`DELETE FROM items WHERE receipt_id=$1`, [id]); // item_shares は CASCADE
+    await insertItemsAndShares(client, id, items);
+    await client.query('COMMIT');
+    res.json({ id });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: (e as Error).message });
@@ -413,6 +462,97 @@ api.get('/trip-photos/:id/photo', async (req, res) => {
   res.set('Content-Type', 'image/jpeg');
   res.set('Cache-Control', 'public, max-age=86400');
   res.send(buf);
+});
+
+// ---- 月次予算・繰り返し支出（日常家計簿向け） ------------------------
+
+// 月次予算の設定（null/空でクリア）
+api.put('/trips/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await tripAccessible(uid(req), id))) return res.status(404).json({ error: 'not found' });
+  const mbRaw = (req.body ?? {}).monthly_budget;
+  const mb = Number.isInteger(mbRaw) && mbRaw >= 0 ? mbRaw : null;
+  const { rows } = await pool.query(
+    `UPDATE trips SET monthly_budget = $2 WHERE id = $1 RETURNING id, monthly_budget`,
+    [id, mb]
+  );
+  res.json(rows[0]);
+});
+
+api.get('/trips/:id/recurring', async (req, res) => {
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await tripAccessible(uid(req), tripId))) return res.status(404).json({ error: 'not found' });
+  const { rows } = await pool.query(
+    `SELECT id, name, amount, category, paid_by, active FROM recurring_expenses
+      WHERE trip_id = $1 ORDER BY id`,
+    [tripId]
+  );
+  res.json(rows);
+});
+
+api.post('/trips/:id/recurring', async (req, res) => {
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await tripAccessible(uid(req), tripId))) return res.status(404).json({ error: 'not found' });
+  const { name, amount, category, paid_by } = req.body ?? {};
+  if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name は必須です' });
+  if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'amount は正の整数で指定してください' });
+  const { rows } = await pool.query(
+    `INSERT INTO recurring_expenses (trip_id, name, amount, category, paid_by)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id, name, amount, category, paid_by, active`,
+    [tripId, name, amount, category || null, Number.isInteger(paid_by) ? paid_by : null]
+  );
+  res.status(201).json(rows[0]);
+});
+
+api.delete('/recurring/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await recurringAccessible(uid(req), id))) return res.status(404).json({ error: 'not found' });
+  await pool.query(`DELETE FROM recurring_expenses WHERE id = $1`, [id]);
+  res.status(204).end();
+});
+
+// 指定月（既定は当月）の繰り返し支出をレシートとして計上。重複（同月・同名）はスキップ。
+api.post('/trips/:id/recurring/generate', async (req, res) => {
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await tripAccessible(uid(req), tripId))) return res.status(404).json({ error: 'not found' });
+  const monthRaw = (req.body ?? {}).month;
+  const month = typeof monthRaw === 'string' && /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : new Date().toISOString().slice(0, 7);
+  const purchasedOn = `${month}-01`;
+
+  const tmpl = await pool.query(`SELECT * FROM recurring_expenses WHERE trip_id=$1 AND active=true ORDER BY id`, [tripId]);
+  const members = (await pool.query(`SELECT id FROM members WHERE trip_id=$1`, [tripId])).rows.map((m) => m.id);
+
+  let created = 0, skipped = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const t of tmpl.rows) {
+      const dup = await client.query(
+        `SELECT 1 FROM receipts WHERE trip_id=$1 AND store_name=$2 AND to_char(purchased_on,'YYYY-MM')=$3 LIMIT 1`,
+        [tripId, t.name, month]
+      );
+      if (dup.rows.length) { skipped++; continue; }
+      const r = await client.query(
+        `INSERT INTO receipts (trip_id, store_name, category, purchased_on, paid_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [tripId, t.name, t.category, purchasedOn, t.paid_by]
+      );
+      const items = [{ name: t.name, price: t.amount, member_ids: members }];
+      await insertItemsAndShares(client, r.rows[0].id, items);
+      created++;
+    }
+    await client.query('COMMIT');
+    res.json({ created, skipped, month });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
+  }
 });
 
 // ---- 分析（旅行横断） -------------------------------------------------

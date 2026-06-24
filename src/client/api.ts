@@ -1,12 +1,14 @@
 // サーバー API を叩く薄いラッパー
 
 export type ProjectKind = 'trip' | 'daily';
-export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: number; group_name?: string; start_date: string | null; end_date: string | null; total?: number };
+export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: number; group_name?: string; start_date: string | null; end_date: string | null; monthly_budget?: number | null; total?: number };
 export type User = { id: number; username: string };
 export type Group = { id: number; name: string; invite_code: string; role: string; members?: number };
 export type Me = { user: User; groups: Group[] };
 export type Member = { id: number; name: string; weight: number };
-export type Item = { id: number; name: string; price: number; quantity: number; member_ids: number[] };
+export type ItemShare = { member_id: number; weight: number | null };
+export type Item = { id: number; name: string; price: number; quantity: number; member_ids: number[]; shares: ItemShare[] };
+export type RecurringExpense = { id: number; name: string; amount: number; category: string | null; paid_by: number | null; active: boolean };
 export type Receipt = {
   id: number;
   store_name: string | null;
@@ -71,7 +73,18 @@ export const api = {
     fetch(`/api/members/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Member>(r)),
   addReceipt: (tripId: number, body: unknown) =>
     fetch(`/api/trips/${tripId}/receipts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number }>(r)),
+  updateReceipt: (id: number, body: unknown) =>
+    fetch(`/api/receipts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number }>(r)),
   deleteReceipt: (id: number) => fetch(`/api/receipts/${id}`, { method: 'DELETE' }),
+  // 月次予算・繰り返し支出
+  setBudget: (tripId: number, monthly_budget: number | null) =>
+    fetch(`/api/trips/${tripId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monthly_budget }) }).then((r) => json<{ id: number; monthly_budget: number | null }>(r)),
+  listRecurring: (tripId: number) => fetch(`/api/trips/${tripId}/recurring`).then((r) => json<RecurringExpense[]>(r)),
+  addRecurring: (tripId: number, body: { name: string; amount: number; category?: string; paid_by?: number | null }) =>
+    fetch(`/api/trips/${tripId}/recurring`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<RecurringExpense>(r)),
+  deleteRecurring: (id: number) => fetch(`/api/recurring/${id}`, { method: 'DELETE' }),
+  generateRecurring: (tripId: number, month?: string) =>
+    fetch(`/api/trips/${tripId}/recurring/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }).then((r) => json<{ created: number; skipped: number; month: string }>(r)),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
   // 思い出写真

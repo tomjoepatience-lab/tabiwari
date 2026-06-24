@@ -47,8 +47,11 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE TABLE IF NOT EXISTS item_shares (
   item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  weight    INTEGER,   -- この明細だけの比重オーバーライド。NULL なら members.weight を継承
   PRIMARY KEY (item_id, member_id)
 );
+-- 既存DB向け（冪等）
+ALTER TABLE item_shares ADD COLUMN IF NOT EXISTS weight INTEGER;
 
 -- 共有家計簿: ユーザー・グループ・メンバー・セッション ----------------
 CREATE TABLE IF NOT EXISTS users (
@@ -80,6 +83,20 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 -- プロジェクト（trips）はグループに属する。ログイン中ユーザーは自分の所属グループの分だけ見える。
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES user_groups(id) ON DELETE CASCADE;
+-- 日常家計簿の月次予算（任意）
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS monthly_budget INTEGER;
+
+-- 繰り返し支出（家賃・サブスク等）のテンプレ。日常プロジェクトで「今月分を計上」に使う。
+CREATE TABLE IF NOT EXISTS recurring_expenses (
+  id          SERIAL PRIMARY KEY,
+  trip_id     INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  amount      INTEGER NOT NULL CHECK (amount > 0),
+  category    TEXT,
+  paid_by     INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- 思い出写真（レシートとは別。これだけがアルバムの素材になる）
 CREATE TABLE IF NOT EXISTS trip_photos (
@@ -99,3 +116,4 @@ CREATE INDEX IF NOT EXISTS idx_trip_photos_trip ON trip_photos (trip_id);
 CREATE INDEX IF NOT EXISTS idx_trips_group       ON trips (group_id);
 CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members (user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user      ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_trip      ON recurring_expenses (trip_id);
