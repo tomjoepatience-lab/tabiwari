@@ -5,3 +5,4 @@ public/main.js.map
 .env
 *.log
 .claude/
+_*.ts
