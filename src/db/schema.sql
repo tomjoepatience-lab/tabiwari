@@ -102,12 +102,15 @@ CREATE TABLE IF NOT EXISTS recurring_expenses (
 CREATE TABLE IF NOT EXISTS trip_photos (
   id          SERIAL PRIMARY KEY,
   trip_id     INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  receipt_id  INTEGER REFERENCES receipts(id) ON DELETE SET NULL,  -- 紐付ける会計（任意）
   photo       BYTEA NOT NULL,            -- 縮小済みJPEG（案A）
   caption     TEXT,                      -- ひとことコメント（任意）
   taken_on    DATE,                      -- 撮影日（任意・アルバムの並び順に使う）
   sort_order  INTEGER NOT NULL DEFAULT 0,-- 手動並べ替え用（編集フェーズで使用）
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 既存DB向け（冪等）
+ALTER TABLE trip_photos ADD COLUMN IF NOT EXISTS receipt_id INTEGER REFERENCES receipts(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_members_trip   ON members (trip_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_trip  ON receipts (trip_id);

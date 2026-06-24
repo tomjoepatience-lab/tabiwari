@@ -7,6 +7,11 @@ import { userGroupIds } from './auth';
 
 export const api = Router();
 
+// クライアント設定（Google Maps キーなど）。requireAuth 配下なのでログイン済みのみ取得可
+api.get('/config', (_req, res) => {
+  res.json({ mapsKey: process.env.GOOGLE_MAPS_API_KEY || '' });
+});
+
 // requireAuth 通過後なので userId は必ずある
 const uid = (req: Request) => (req as any).userId as number;
 
@@ -218,9 +223,9 @@ api.get('/trips/:id', async (req, res) => {
     return { ...r, items, total };
   });
 
-  // 思い出写真（レシートとは別。アルバムの素材）
+  // 思い出写真（レシートとは別。アルバムの素材）。会計(receipt_id)に紐付け可
   const photosQ = await pool.query(
-    `SELECT id, caption, taken_on, sort_order FROM trip_photos
+    `SELECT id, receipt_id, caption, taken_on, sort_order FROM trip_photos
       WHERE trip_id = $1 ORDER BY sort_order, taken_on NULLS LAST, id`,
     [tripId]
   );
@@ -413,13 +418,14 @@ api.post('/trips/:id/photos', async (req, res) => {
   const tripId = Number(req.params.id);
   if (!Number.isInteger(tripId)) return res.status(400).json({ error: 'invalid id' });
   if (!(await tripAccessible(uid(req), tripId))) return res.status(404).json({ error: 'not found' });
-  const { photo, caption, taken_on } = req.body ?? {};
+  const { photo, caption, taken_on, receipt_id } = req.body ?? {};
   const buf = decodePhoto(photo);
   if (!buf) return res.status(400).json({ error: 'photo（写真）は必須です' });
+  const rid = Number.isInteger(receipt_id) ? receipt_id : null;
   const { rows } = await pool.query(
-    `INSERT INTO trip_photos (trip_id, photo, caption, taken_on)
-     VALUES ($1,$2,$3,$4) RETURNING id, caption, taken_on, sort_order`,
-    [tripId, buf, caption || null, taken_on || null]
+    `INSERT INTO trip_photos (trip_id, photo, caption, taken_on, receipt_id)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id, receipt_id, caption, taken_on, sort_order`,
+    [tripId, buf, caption || null, taken_on || null, rid]
   );
   res.status(201).json(rows[0]);
 });

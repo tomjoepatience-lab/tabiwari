@@ -77,16 +77,30 @@ auth.post('/register', async (req, res) => {
   if (typeof password !== 'string' || password.length < 4) {
     return res.status(400).json({ error: 'パスワードは4文字以上で入力してください' });
   }
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    const { rows } = await client.query(
       `INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username`,
       [username.trim(), hashPassword(password)]
     );
-    await createSession(res, rows[0].id);
+    const userId = rows[0].id;
+    // 個人利用にすぐ使えるよう、登録時に自分用グループを自動作成（共有は後から招待でOK）
+    const code = crypto.randomBytes(4).toString('hex');
+    const g = await client.query(
+      `INSERT INTO user_groups (name, invite_code) VALUES ($1, $2) RETURNING id`,
+      [`${username.trim()}の家計簿`, code]
+    );
+    await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
+    await client.query('COMMIT');
+    await createSession(res, userId);
     res.status(201).json({ user: rows[0] });
   } catch (e: any) {
+    await client.query('ROLLBACK');
     if (e?.code === '23505') return res.status(409).json({ error: 'そのユーザー名は既に使われています' });
     res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
   }
 });
 

@@ -26,7 +26,7 @@ export type Analytics = {
   byCategory: { category: string; total: number }[];
   byTrip: { title: string; total: number }[];
 };
-export type TripPhoto = { id: number; caption: string | null; taken_on: string | null; sort_order: number };
+export type TripPhoto = { id: number; receipt_id: number | null; caption: string | null; taken_on: string | null; sort_order: number };
 export type PerMember = { memberId: number; name: string; paid: number; owed: number; net: number };
 export type Transfer = { from: number; to: number; amount: number };
 export type TripDetail = {
@@ -87,8 +87,9 @@ export const api = {
     fetch(`/api/trips/${tripId}/recurring/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }).then((r) => json<{ created: number; skipped: number; month: string }>(r)),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
+  config: () => fetch('/api/config').then((r) => json<{ mapsKey: string }>(r)),
   // 思い出写真
-  addTripPhoto: (tripId: number, body: { photo: string; caption?: string; taken_on?: string }) =>
+  addTripPhoto: (tripId: number, body: { photo: string; caption?: string; taken_on?: string; receipt_id?: number | null }) =>
     fetch(`/api/trips/${tripId}/photos`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<TripPhoto>(r)),
   deleteTripPhoto: (id: number) => fetch(`/api/trip-photos/${id}`, { method: 'DELETE' }),
   tripPhotoUrl: (id: number) => `/api/trip-photos/${id}/photo`,

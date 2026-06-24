@@ -507,20 +507,28 @@ function memoryTab(d: TripDetail) {
   });
   const caption = el('input', { name: 'caption', placeholder: 'ひとこと（任意）' });
   const date = el('input', { name: 'taken_on', type: 'date' });
+  // 紐付ける会計（任意）
+  const receiptLabel = (r: Receipt) => `${fmtDate(r.purchased_on)} ${r.store_name || '(店名なし)'} ${yen(r.total)}`;
+  const linkSel = el('select', { name: 'receipt_id' }, [
+    el('option', { value: '', textContent: '（紐付けない）' }),
+    ...d.receipts.map((r) => el('option', { value: String(r.id), textContent: receiptLabel(r) })),
+  ]);
   const form = el('form', { class: 'card' }, [
     el('h3', { textContent: '思い出写真を追加' }),
     el('div', { class: 'row' }, [labeled('写真', fileInput), labeled('撮影日', date)]),
     labeled('キャプション', caption),
+    labeled('紐付ける会計（任意）', linkSel),
     preview,
     el('div', {}, [el('button', { type: 'submit', class: 'primary', textContent: '追加' })]),
   ]);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!photoData) return alert('写真を選んでください。');
-    await api.addTripPhoto(d.trip.id, { photo: photoData, caption: caption.value, taken_on: date.value });
+    await api.addTripPhoto(d.trip.id, { photo: photoData, caption: caption.value, taken_on: date.value, receipt_id: linkSel.value ? Number(linkSel.value) : null });
     await renderTrip(d.trip.id);
   });
 
+  const receiptById = new Map(d.receipts.map((r) => [r.id, r]));
   const grid = d.photos.length
     ? el('div', { class: 'photo-grid' }, d.photos.map((p) => {
         const img = el('img', { class: 'photo-thumb', src: api.tripPhotoUrl(p.id), loading: 'lazy', alt: p.caption || '' });
@@ -531,8 +539,10 @@ function memoryTab(d: TripDetail) {
           await api.deleteTripPhoto(p.id);
           await renderTrip(d.trip.id);
         });
+        const linked = p.receipt_id != null ? receiptById.get(p.receipt_id) : undefined;
         return el('div', { class: 'photo-item' }, [img, del,
-          p.caption ? el('div', { class: 'photo-cap', textContent: p.caption }) : el('span')]);
+          p.caption ? el('div', { class: 'photo-cap', textContent: p.caption }) : el('span'),
+          linked ? el('div', { class: 'photo-link', textContent: `🧾 ${linked.store_name || '会計'} ${yen(linked.total)}` }) : el('span')]);
       }))
     : el('p', { class: 'muted', textContent: 'まだ思い出写真がありません。下から追加すると「📖 アルバム」にまとまります。' });
 
@@ -583,8 +593,68 @@ function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
   }));
 }
 
-// --- 地図タブ ---------------------------------------------------------
-function initMap(d: TripDetail, nameOf: (id: number | null) => string) {
+// --- 地図タブ（Google Maps、ダメなら Leaflet/OSM にフォールバック） ----
+let mapsKeyCache: string | null = null;
+let gmapsPromise: Promise<any> | null = null;
+let lastMapCtx: { d: TripDetail; nameOf: (id: number | null) => string } | null = null;
+
+async function getMapsKey(): Promise<string> {
+  if (mapsKeyCache !== null) return mapsKeyCache;
+  try { mapsKeyCache = (await api.config()).mapsKey || ''; } catch { mapsKeyCache = ''; }
+  return mapsKeyCache;
+}
+function loadGoogleMaps(key: string): Promise<any> {
+  const w = window as any;
+  if (w.google?.maps) return Promise.resolve(w.google);
+  if (gmapsPromise) return gmapsPromise;
+  gmapsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly`;
+    s.async = true;
+    s.onload = () => (w.google?.maps ? resolve(w.google) : reject(new Error('maps unavailable')));
+    s.onerror = () => reject(new Error('maps script error'));
+    document.head.appendChild(s);
+  });
+  return gmapsPromise;
+}
+// キー無効/リファラ制限などの認証失敗時は Leaflet にフォールバック
+(window as any).gm_authFailure = () => { if (lastMapCtx && byId('trip-map')) renderLeafletMap(lastMapCtx.d, lastMapCtx.nameOf); };
+
+async function initMap(d: TripDetail, nameOf: (id: number | null) => string) {
+  lastMapCtx = { d, nameOf };
+  try {
+    const key = await getMapsKey();
+    if (!key) throw new Error('no key');
+    await loadGoogleMaps(key);
+    if (!byId('trip-map')) return; // タブが切り替わっていたら何もしない
+    renderGoogleMap(d, nameOf);
+  } catch {
+    renderLeafletMap(d, nameOf);
+  }
+}
+
+function renderGoogleMap(d: TripDetail, nameOf: (id: number | null) => string) {
+  const google = (window as any).google;
+  const elc = byId('trip-map');
+  if (!elc || !google?.maps) { renderLeafletMap(d, nameOf); return; }
+  const pinned = d.receipts.filter((r) => r.lat != null && r.lng != null);
+  const map = new google.maps.Map(elc, {
+    center: pinned[0] ? { lat: pinned[0].lat, lng: pinned[0].lng } : { lat: 35.68, lng: 139.76 },
+    zoom: pinned.length ? 8 : 4, mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+  });
+  const bounds = new google.maps.LatLngBounds();
+  pinned.forEach((r) => {
+    const mk = new google.maps.Marker({ position: { lat: r.lat, lng: r.lng }, map, title: r.store_name || '' });
+    bounds.extend(mk.getPosition());
+    mk.addListener('click', () => openModal(d, r, nameOf));
+  });
+  if (pinned.length > 1) map.fitBounds(bounds);
+}
+
+function renderLeafletMap(d: TripDetail, nameOf: (id: number | null) => string) {
+  const elc = byId('trip-map');
+  if (!elc || typeof L === 'undefined') return;
+  elc.innerHTML = '';
   const pinned = d.receipts.filter((r) => r.lat != null && r.lng != null);
   const map = L.map('trip-map');
   mapInstance = map;
@@ -596,8 +666,7 @@ function initMap(d: TripDetail, nameOf: (id: number | null) => string) {
     mk.on('click', () => openModal(d, r, nameOf));
     return mk;
   });
-  const group = L.featureGroup(markers);
-  map.fitBounds(group.getBounds().pad(0.3));
+  map.fitBounds(L.featureGroup(markers).getBounds().pad(0.3));
 }
 
 // --- 詳細モーダル -----------------------------------------------------
@@ -645,7 +714,6 @@ function receiptBreakdown(r: Receipt, members: Member[]) {
 function receiptForm(d: TripDetail, editing?: Receipt) {
   if (!d.members.length) return el('section', { class: 'card', id: 'receipt-form' }, [el('h2', { textContent: 'レシートを追加' }), el('p', { class: 'muted', textContent: '先にメンバーを追加してください。' })]);
 
-  let photoData: string | null = null;
   let coords: { lat: number; lng: number } | null = null;
 
   const itemsWrap = el('div', { class: 'item-rows' });
@@ -655,18 +723,16 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
   if (editing) setItems(editing.items.map((it) => ({ name: it.name, price: it.price, shares: it.shares })));
   else addRow();
 
-  // レシートOCR（Tesseract.js）。画像を写真として添付しつつ、明細の下書きを作る
+  // レシートOCR。画像から明細の下書きを作るだけ（写真はレシートに保存しない）
   const ocrInput = el('input', { type: 'file', accept: 'image/*' });
   const ocrStatus = el('span', { class: 'muted' });
   ocrInput.addEventListener('change', async () => {
     const file = ocrInput.files?.[0];
     if (!file) return;
-    photoData = await resizeImage(file);
-    preview.src = photoData;
-    preview.style.display = 'block';
     ocrStatus.textContent = '読み取り中…（数秒かかります）';
     try {
-      const result = await runOcr(photoData);
+      const scan = await resizeImage(file);
+      const result = await runOcr(scan);
       if (result.items.length) {
         setItems(result.items);
         if (result.store_name && !store.value) store.value = result.store_name;
@@ -687,18 +753,6 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
   const date = el('input', { name: 'purchased_on', type: 'date', required: true, value: editing ? editing.purchased_on.slice(0, 10) : new Date().toISOString().slice(0, 10) });
   const paidBy = el('select', { name: 'paid_by' }, d.members.map((m) => el('option', { value: String(m.id), textContent: m.name })));
   if (editing?.paid_by != null) paidBy.value = String(editing.paid_by);
-
-  // 写真
-  const photoInput = el('input', { type: 'file', accept: 'image/*' });
-  const preview = el('img', { class: 'preview', style: 'display:none' as any });
-  if (editing?.has_photo) { preview.src = api.photoUrl(editing.id); preview.style.display = 'block'; }
-  photoInput.addEventListener('change', async () => {
-    const file = photoInput.files?.[0];
-    if (!file) return;
-    photoData = await resizeImage(file);
-    preview.src = photoData;
-    preview.style.display = 'block';
-  });
 
   // 位置
   const locStatus = el('span', { class: 'muted' });
@@ -738,7 +792,7 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
     el('div', { class: 'scan-ico', textContent: '📷' }),
     el('div', { class: 'scan-text' }, [
       el('strong', { textContent: 'レシートを撮るだけ' }),
-      el('div', { class: 'muted', textContent: 'AIが店名・日付・明細を自動入力。写真も一緒に保存されます。' }),
+      el('div', { class: 'muted', textContent: 'AIが店名・日付・明細を自動入力（写真はレシートには保存されません）。' }),
       ocrStatus,
     ]),
     scanBtn, ocrInput,
@@ -749,8 +803,7 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
     scanBanner,
     el('div', { class: 'row' }, [labeled('店名', store), labeled('カテゴリ', category)]),
     el('div', { class: 'row' }, [labeled('日付', date), labeled('払った人', paidBy)]),
-    el('div', { class: 'row' }, [labeled(editing ? '写真（変更する場合のみ）' : '写真', photoInput), el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])])]),
-    preview,
+    el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])]),
     el('h3', { textContent: '明細（負担者を選ぶ／「この明細だけ比率を指定」で品目別の比重も設定可）' }),
     itemsWrap,
     addItemBtn,
@@ -790,11 +843,9 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
     };
     try {
       if (editing) {
-        if (photoData) body.photo = photoData; // 新しい写真を選んだときだけ差し替え
         await api.updateReceipt(editing.id, body);
         editingReceiptId = null;
       } else {
-        body.photo = photoData;
         await api.addReceipt(d.trip.id, body);
       }
       await renderTrip(d.trip.id);
