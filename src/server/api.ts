@@ -264,6 +264,26 @@ api.post('/trips/:id/members', async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// メンバー削除（支払者だった会計は paid_by を NULL に、負担割当は CASCADE で外れる）
+api.delete('/members/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await memberAccessible(uid(req), id))) return res.status(404).json({ error: 'not found' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`UPDATE receipts SET paid_by = NULL WHERE paid_by = $1`, [id]);
+    await client.query(`DELETE FROM members WHERE id = $1`, [id]);
+    await client.query('COMMIT');
+    res.status(204).end();
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
+  }
+});
+
 // メンバー更新（名前・比重）
 api.put('/members/:id', async (req, res) => {
   const id = Number(req.params.id);

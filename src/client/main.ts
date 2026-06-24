@@ -21,7 +21,7 @@ function avatarEl(label: string, colorIdx: number, extraClass = '') {
 
 let charts: any[] = [];
 let mapInstance: any = null;
-let tripTab: 'memory' | 'map' | 'list' | 'analytics' = 'memory';
+let tripTab: 'summary' | 'add' | 'list' | 'memory' | 'map' | 'analytics' = 'summary';
 let currentUser: User | null = null;
 let myGroups: Group[] = [];
 let editingReceiptId: number | null = null;
@@ -263,35 +263,43 @@ async function renderTrip(id: number) {
   }
   const header = el('div', { class: 'trip-header ' + (isTrip ? 'trip' : 'daily') }, headerChildren);
 
-  const tabs = el('div', { class: 'tabs' });
   const panel = el('div', { class: 'panel' });
-  // 旅行は思い出/地図/リスト、日常はリスト＋月次・カテゴリ分析（割り勘・集計は両方で使える）
-  const tabDefs: [typeof tripTab, string][] = isTrip
-    ? [['memory', '思い出'], ['map', '地図'], ['list', 'リスト']]
-    : [['list', 'リスト'], ['analytics', '月次・カテゴリ']];
-  if (!tabDefs.some(([k]) => k === tripTab)) tripTab = tabDefs[0][0];
+  // タブで縦スクロールを避ける。精算/追加/リストは共通、思い出・地図=旅行、月次=日常
+  const tabDefs: [typeof tripTab, string, string][] = isTrip
+    ? [['summary', '💸', '精算'], ['add', '➕', '追加'], ['list', '📋', 'リスト'], ['memory', '🖼', '思い出'], ['map', '🗺', '地図']]
+    : [['summary', '💸', '精算'], ['add', '➕', '追加'], ['list', '📋', 'リスト'], ['analytics', '📊', '月次']];
+  if (!tabDefs.some(([k]) => k === tripTab)) tripTab = 'summary';
+
+  const tabbar = el('nav', { class: 'tabbar' });
   const drawTabs = () => {
-    tabs.replaceChildren(...tabDefs.map(([key, label]) => {
-      const b = el('button', { class: 'tab' + (tripTab === key ? ' active' : ''), textContent: label });
+    tabbar.replaceChildren(...tabDefs.map(([key, ico, label]) => {
+      const b = el('button', { class: 'tabbar-item' + (tripTab === key ? ' active' : '') }, [
+        el('span', { class: 'ti-ico', textContent: ico }),
+        el('span', { textContent: label }),
+      ]);
       b.addEventListener('click', () => { tripTab = key; drawTabs(); renderPanel(d, panel, nameOf); });
       return b;
     }));
   };
   drawTabs();
 
-  const editing = editingReceiptId ? d.receipts.find((r) => r.id === editingReceiptId) : undefined;
-  app().replaceChildren(header, membersCard(d), summaryCard(d, nameOf), receiptForm(d, editing), el('section', { class: 'card' }, [tabs, panel]));
+  app().replaceChildren(el('div', { class: 'detail' }, [header, panel]), tabbar);
   renderPanel(d, panel, nameOf);
-  if (editing) document.getElementById('receipt-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderPanel(d: TripDetail, panel: HTMLElement, nameOf: (id: number | null) => string) {
-  // タブ切替で前タブのグラフを破棄（route() はナビ時のみ破棄するため）
+  // タブ切替で前タブのグラフ・地図を破棄（route() はナビ時のみ破棄するため）
   charts.forEach((c) => c.destroy());
   charts = [];
-  if (tripTab === 'memory') panel.replaceChildren(memoryTab(d));
+  if (mapInstance) { try { mapInstance.remove(); } catch { /* noop */ } mapInstance = null; }
+  if (tripTab === 'summary') panel.replaceChildren(membersCard(d), summaryCard(d, nameOf));
+  else if (tripTab === 'add') {
+    const editing = editingReceiptId ? d.receipts.find((r) => r.id === editingReceiptId) : undefined;
+    panel.replaceChildren(receiptForm(d, editing));
+  }
   else if (tripTab === 'list') panel.replaceChildren(receiptList(d, nameOf));
   else if (tripTab === 'analytics') renderProjectAnalytics(d, panel);
+  else if (tripTab === 'memory') panel.replaceChildren(memoryTab(d));
   else { panel.replaceChildren(el('div', { class: 'map', id: 'trip-map' })); initMap(d, nameOf); }
 }
 
@@ -417,21 +425,31 @@ function ratioLabel(members: Member[]): string {
 }
 
 function membersCard(d: TripDetail) {
-  // メンバーごとに比率（weight）を編集できる
+  // 各メンバーの名前・比率を編集、削除も可能
   const rows = d.members.map((m, i) => {
+    const nameInput = el('input', { value: m.name, class: 'member-name-input' });
     const w = el('input', { type: 'number', min: '1', value: String(m.weight), class: 'weight-input' });
     const save = async () => {
-      const v = Math.max(1, parseInt(w.value, 10) || 1);
-      if (v === m.weight) return;
-      await api.updateMember(m.id, { weight: v });
+      const nn = nameInput.value.trim();
+      const wv = Math.max(1, parseInt(w.value, 10) || 1);
+      if (!nn || (nn === m.name && wv === m.weight)) return;
+      await api.updateMember(m.id, { name: nn, weight: wv });
       await renderTrip(d.trip.id);
     };
+    nameInput.addEventListener('change', save);
     w.addEventListener('change', save);
+    const del = el('button', { type: 'button', class: 'link-btn danger', textContent: '削除' });
+    del.addEventListener('click', async () => {
+      if (!confirm(`「${m.name}」を削除しますか？\n（このメンバーの負担割当は外れ、支払者だった会計は支払者なしになります）`)) return;
+      await api.deleteMember(m.id);
+      await renderTrip(d.trip.id);
+    });
     return el('div', { class: 'member-row' }, [
       avatarEl(m.name, i),
-      el('span', { class: 'member-name', textContent: m.name }),
+      nameInput,
       el('span', { class: 'field-label', textContent: '比率' }),
       w,
+      del,
     ]);
   });
 
@@ -440,17 +458,19 @@ function membersCard(d: TripDetail) {
   const form = el('form', { class: 'row' }, [
     labeled('名前', nameInput),
     labeled('比率', weightInput),
-    el('button', { type: 'submit', textContent: '追加' }),
+    el('button', { type: 'submit', class: 'primary', textContent: '＋ 追加' }),
   ]);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await api.addMember(d.trip.id, nameInput.value, Math.max(1, parseInt(weightInput.value, 10) || 1));
+    if (!nameInput.value.trim()) return alert('メンバー名を入力してください。');
+    await api.addMember(d.trip.id, nameInput.value.trim(), Math.max(1, parseInt(weightInput.value, 10) || 1));
     await renderTrip(d.trip.id);
   });
 
   const label = ratioLabel(d.members);
   return el('section', { class: 'card' }, [
     el('h2', { textContent: 'メンバー・割り勘の比率' }),
+    el('p', { class: 'muted', textContent: '名前・比率はその場で編集できます（変更すると自動保存）。' }),
     d.members.length ? el('div', { class: 'members' }, rows) : el('p', { class: 'muted', textContent: 'メンバーを追加してください。' }),
     label ? el('p', { class: 'muted', textContent: '現在の比率 … ' + label }) : el('span'),
     form,
@@ -560,6 +580,7 @@ function receiptList(d: TripDetail, nameOf: (id: number | null) => string) {
     edit.addEventListener('click', (e) => {
       e.stopPropagation();
       editingReceiptId = r.id;
+      tripTab = 'add';
       renderTrip(d.trip.id);
     });
     const del = el('button', { class: 'link-btn', textContent: '削除' });
@@ -848,6 +869,7 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
       } else {
         await api.addReceipt(d.trip.id, body);
       }
+      tripTab = 'list';
       await renderTrip(d.trip.id);
     } catch (err) {
       alert((err as Error).message);

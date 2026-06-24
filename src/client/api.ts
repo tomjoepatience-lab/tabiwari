@@ -71,6 +71,7 @@ export const api = {
     fetch(`/api/trips/${tripId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, weight }) }).then((r) => json<Member>(r)),
   updateMember: (id: number, body: { name?: string; weight?: number }) =>
     fetch(`/api/members/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Member>(r)),
+  deleteMember: (id: number) => fetch(`/api/members/${id}`, { method: 'DELETE' }),
   addReceipt: (tripId: number, body: unknown) =>
     fetch(`/api/trips/${tripId}/receipts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number }>(r)),
   updateReceipt: (id: number, body: unknown) =>
