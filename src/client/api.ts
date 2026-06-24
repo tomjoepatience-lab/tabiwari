@@ -5,7 +5,7 @@ export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: nu
 export type User = { id: number; username: string };
 export type Group = { id: number; name: string; invite_code: string; role: string; members?: number };
 export type Me = { user: User; groups: Group[] };
-export type Member = { id: number; name: string };
+export type Member = { id: number; name: string; weight: number };
 export type Item = { id: number; name: string; price: number; quantity: number; member_ids: number[] };
 export type Receipt = {
   id: number;
@@ -65,8 +65,10 @@ export const api = {
   getTrip: (id: number) => fetch(`/api/trips/${id}`).then((r) => json<TripDetail>(r)),
   createTrip: (body: { title: string; kind?: ProjectKind; group_id: number; start_date?: string; end_date?: string }) =>
     fetch('/api/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Trip>(r)),
-  addMember: (tripId: number, name: string) =>
-    fetch(`/api/trips/${tripId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Member>(r)),
+  addMember: (tripId: number, name: string, weight?: number) =>
+    fetch(`/api/trips/${tripId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, weight }) }).then((r) => json<Member>(r)),
+  updateMember: (id: number, body: { name?: string; weight?: number }) =>
+    fetch(`/api/members/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<Member>(r)),
   addReceipt: (tripId: number, body: unknown) =>
     fetch(`/api/trips/${tripId}/receipts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number }>(r)),
   deleteReceipt: (id: number) => fetch(`/api/receipts/${id}`, { method: 'DELETE' }),

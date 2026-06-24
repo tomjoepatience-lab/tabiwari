@@ -280,19 +280,49 @@ function renderProjectAnalytics(d: TripDetail, panel: HTMLElement) {
   }));
 }
 
+// 比率の表示用ラベル（例: 太郎 6 : 花子 4 ／ 全員同じなら「均等」）
+function ratioLabel(members: Member[]): string {
+  if (members.length < 2) return '';
+  if (members.every((m) => m.weight === members[0].weight)) return '均等（全員同じ負担）';
+  return members.map((m) => `${m.name} ${m.weight}`).join(' : ');
+}
+
 function membersCard(d: TripDetail) {
+  // メンバーごとに比率（weight）を編集できる
+  const rows = d.members.map((m) => {
+    const w = el('input', { type: 'number', min: '1', value: String(m.weight), class: 'weight-input' });
+    const save = async () => {
+      const v = Math.max(1, parseInt(w.value, 10) || 1);
+      if (v === m.weight) return;
+      await api.updateMember(m.id, { weight: v });
+      await renderTrip(d.trip.id);
+    };
+    w.addEventListener('change', save);
+    return el('div', { class: 'member-row' }, [
+      el('span', { class: 'member-name', textContent: m.name }),
+      el('span', { class: 'field-label', textContent: '比率' }),
+      w,
+    ]);
+  });
+
+  const nameInput = el('input', { name: 'name', placeholder: 'メンバー名', required: true });
+  const weightInput = el('input', { name: 'weight', type: 'number', min: '1', value: '1', class: 'weight-input' });
   const form = el('form', { class: 'row' }, [
-    el('input', { name: 'name', placeholder: 'メンバー名を追加', required: true }),
+    labeled('名前', nameInput),
+    labeled('比率', weightInput),
     el('button', { type: 'submit', textContent: '追加' }),
   ]);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await api.addMember(d.trip.id, String(new FormData(form).get('name')));
+    await api.addMember(d.trip.id, nameInput.value, Math.max(1, parseInt(weightInput.value, 10) || 1));
     await renderTrip(d.trip.id);
   });
+
+  const label = ratioLabel(d.members);
   return el('section', { class: 'card' }, [
-    el('h2', { textContent: 'メンバー' }),
-    el('div', { class: 'chips' }, d.members.map((m) => el('span', { class: 'chip', textContent: m.name }))),
+    el('h2', { textContent: 'メンバー・割り勘の比率' }),
+    d.members.length ? el('div', { class: 'members' }, rows) : el('p', { class: 'muted', textContent: 'メンバーを追加してください。' }),
+    label ? el('p', { class: 'muted', textContent: '現在の比率 … ' + label }) : el('span'),
     form,
   ]);
 }
@@ -442,11 +472,12 @@ function openModal(d: TripDetail, r: Receipt, nameOf: (id: number | null) => str
 }
 
 function receiptBreakdown(r: Receipt, members: Member[]) {
+  const weightOf = new Map(members.map((m) => [m.id, m.weight > 0 ? m.weight : 1]));
   const owed = new Map<number, number>();
   for (const it of r.items) {
     const sharers = it.member_ids.length ? it.member_ids : members.map((m) => m.id);
-    const each = it.price / sharers.length;
-    for (const m of sharers) owed.set(m, (owed.get(m) ?? 0) + each);
+    const sumW = sharers.reduce((s, m) => s + (weightOf.get(m) ?? 1), 0) || 1;
+    for (const m of sharers) owed.set(m, (owed.get(m) ?? 0) + it.price * (weightOf.get(m) ?? 1) / sumW);
   }
   return members.map((m) => ({ name: m.name, owed: Math.round(owed.get(m.id) ?? 0) })).filter((b) => b.owed > 0);
 }

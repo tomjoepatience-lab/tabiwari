@@ -37,6 +37,17 @@ async function photoAccessible(userId: number, photoId: number): Promise<boolean
   );
   return rows.length > 0;
 }
+async function memberAccessible(userId: number, memberId: number): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM members mb JOIN trips t ON t.id = mb.trip_id
+       JOIN group_members gm ON gm.group_id = t.group_id
+      WHERE mb.id = $1 AND gm.user_id = $2`,
+    [memberId, userId]
+  );
+  return rows.length > 0;
+}
+// weight を 1以上の整数に丸める（不正値は 1）
+const normWeight = (w: unknown) => (Number.isInteger(w) && (w as number) > 0 ? (w as number) : 1);
 
 // ---- グループ（家族の共有単位） --------------------------------------
 api.get('/groups', async (req, res) => {
@@ -148,7 +159,7 @@ api.get('/trips/:id', async (req, res) => {
   if (tripQ.rowCount === 0) return res.status(404).json({ error: 'not found' });
 
   const membersQ = await pool.query(
-    `SELECT id, name FROM members WHERE trip_id = $1 ORDER BY id`,
+    `SELECT id, name, weight FROM members WHERE trip_id = $1 ORDER BY id`,
     [tripId]
   );
   const receiptsQ = await pool.query(
@@ -204,12 +215,11 @@ api.get('/trips/:id', async (req, res) => {
     [tripId]
   );
 
-  const memberIds = membersQ.rows.map((m) => m.id);
   const calcReceipts: CalcReceipt[] = receipts.map((r) => ({
     paidBy: r.paid_by,
     items: r.items.map((it: any) => ({ price: it.price, memberIds: it.member_ids })),
   }));
-  const summary = summarize(memberIds, calcReceipts);
+  const summary = summarize(membersQ.rows.map((m) => ({ id: m.id, weight: m.weight })), calcReceipts);
 
   // 集計に名前を添える
   const nameOf = new Map(membersQ.rows.map((m) => [m.id, m.name]));
@@ -228,15 +238,32 @@ api.get('/trips/:id', async (req, res) => {
 
 api.post('/trips/:id/members', async (req, res) => {
   const tripId = Number(req.params.id);
-  const { name } = req.body ?? {};
+  const { name, weight } = req.body ?? {};
   if (!Number.isInteger(tripId)) return res.status(400).json({ error: 'invalid id' });
   if (!(await tripAccessible(uid(req), tripId))) return res.status(404).json({ error: 'not found' });
   if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name は必須です' });
   const { rows } = await pool.query(
-    `INSERT INTO members (trip_id, name) VALUES ($1, $2) RETURNING id, name`,
-    [tripId, name]
+    `INSERT INTO members (trip_id, name, weight) VALUES ($1, $2, $3) RETURNING id, name, weight`,
+    [tripId, name, normWeight(weight)]
   );
   res.status(201).json(rows[0]);
+});
+
+// メンバー更新（名前・比重）
+api.put('/members/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  if (!(await memberAccessible(uid(req), id))) return res.status(404).json({ error: 'not found' });
+  const { name, weight } = req.body ?? {};
+  const { rows } = await pool.query(
+    `UPDATE members
+        SET name   = COALESCE($2, name),
+            weight = COALESCE($3, weight)
+      WHERE id = $1
+      RETURNING id, name, weight`,
+    [id, typeof name === 'string' && name ? name : null, weight === undefined ? null : normWeight(weight)]
+  );
+  res.json(rows[0]);
 });
 
 // ---- レシート（明細＋負担者をまとめて登録） --------------------------
