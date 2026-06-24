@@ -266,6 +266,26 @@ button.primary:hover { filter: brightness(1.06); background: var(--accent); }
 /* 地図 */
 .map { height: 360px; border-radius: 10px; overflow: hidden; }
 
+/* 場所ピッカー（地図でピンを刺す） */
+.picker-overlay { position: fixed; inset: 0; z-index: 2500; background: var(--bg); }
+.picker-map { position: absolute; inset: 0; }
+.picker-search { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 2; }
+.picker-search-row { display: flex; gap: 8px; }
+.picker-input { flex: 1; background: #fff; border-radius: 12px; padding: 11px 14px; box-shadow: var(--shadow); }
+.picker-search .primary { box-shadow: var(--shadow); }
+.picker-results { margin-top: 8px; background: #fff; border: 1px solid var(--border); border-radius: 12px; max-height: 46vh; overflow: auto; box-shadow: var(--shadow); }
+.picker-result { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.picker-result:last-child { border-bottom: none; }
+.picker-result:hover { background: var(--accent-weak); }
+.picker-result-name { font-weight: 700; font-size: 14px; }
+.picker-result-detail { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-loc { position: absolute; right: 16px; bottom: 168px; z-index: 2; background: #fff; border-radius: 999px; padding: 10px 16px; font-weight: 700; color: var(--accent-deep); box-shadow: var(--shadow); }
+.picker-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; background: #fff; border-radius: 18px 18px 0 0; padding: 16px 18px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 12px rgba(0,0,0,0.12); }
+.picker-tag { font-size: 12px; font-weight: 800; color: var(--accent-deep); }
+.picker-name { font-size: 18px; font-weight: 800; margin: 2px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-bar { display: flex; gap: 12px; }
+.picker-bar button { flex: 1; padding: 13px; border-radius: 12px; }
+
 /* グラフ */
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .chart-box { min-width: 0; }

@@ -2,6 +2,7 @@ import { api, Group, Member, ProjectKind, Receipt, Trip, TripDetail, User } from
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
 import { openAlbum } from './album';
+import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 
 declare const L: any;
 declare const Chart: any;
@@ -690,6 +691,139 @@ function renderLeafletMap(d: TripDetail, nameOf: (id: number | null) => string) 
   map.fitBounds(L.featureGroup(markers).getBounds().pad(0.3));
 }
 
+// --- 場所ピッカー（tabikake 移植：タップ/検索/現在地でピンを決める） ----
+type Picked = { lat: number; lng: number; name: string | null };
+async function openMapPicker(initial: { lat: number; lng: number } | null): Promise<Picked | null> {
+  const start = initial ?? { lat: 35.681, lng: 139.767 };
+  let picked: { lat: number; lng: number } | null = initial ? { ...initial } : null;
+  let pickedName: string | null = null;
+  let reverseToken = 0;
+
+  const overlay = el('div', { class: 'picker-overlay' });
+  const mapDiv = el('div', { class: 'picker-map', id: 'picker-map' });
+  const searchInput = el('input', { class: 'picker-input', placeholder: '店名・地名で検索' });
+  const searchBtn = el('button', { type: 'button', class: 'primary', textContent: '検索' });
+  const results = el('div', { class: 'picker-results', style: 'display:none' as any });
+  const locBtn = el('button', { type: 'button', class: 'picker-loc', textContent: '📍 現在地' });
+  const sheetName = el('div', { class: 'picker-name', textContent: '地図のピンをタップ／検索／現在地で選べます' });
+  const sheetTag = el('div', { class: 'picker-tag', textContent: '場所を選ぶ' });
+  const okBtn = el('button', { type: 'button', class: 'primary', textContent: 'この場所にする' });
+  const cancelBtn = el('button', { type: 'button', textContent: 'キャンセル' });
+
+  const updateSheet = () => {
+    sheetTag.textContent = picked ? '✓ 選択中' : '場所を選ぶ';
+    sheetName.textContent = picked ? (pickedName || '選択した地点') : '地図のピンをタップ／検索／現在地で選べます';
+    okBtn.toggleAttribute('disabled', !picked);
+  };
+
+  let setPin: (lat: number, lng: number) => void = () => {};
+  let panTo: (lat: number, lng: number, zoom?: number) => void = () => {};
+
+  // 選択を確定（doReverse=true なら名前を逆ジオで補完）
+  const setPicked = async (lat: number, lng: number, name: string | null, doReverse: boolean) => {
+    picked = { lat, lng };
+    pickedName = name;
+    setPin(lat, lng);
+    results.style.display = 'none';
+    updateSheet();
+    if (doReverse && !name) {
+      const t = ++reverseToken;
+      const r = await reverseGeocode(lat, lng);
+      if (t === reverseToken && picked && r.name) { pickedName = r.name; updateSheet(); }
+    }
+  };
+
+  const finish = (result: Picked | null) => {
+    document.removeEventListener('keydown', onKey);
+    overlay.remove();
+    resolveFn(result);
+  };
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish(null); };
+  let resolveFn: (v: Picked | null) => void;
+  const promise = new Promise<Picked | null>((res) => { resolveFn = res; });
+
+  okBtn.addEventListener('click', () => { if (picked) finish({ ...picked, name: pickedName }); });
+  cancelBtn.addEventListener('click', () => finish(null));
+  document.addEventListener('keydown', onKey);
+
+  const runSearch = async () => {
+    const q = searchInput.value.trim();
+    if (!q) return;
+    searchBtn.textContent = '…';
+    const res = await searchPlaces(q, picked ? { lat: picked.lat, lon: picked.lng } : undefined);
+    searchBtn.textContent = '検索';
+    if (!res.length) { results.replaceChildren(el('div', { class: 'picker-result muted', textContent: '見つかりませんでした' })); results.style.display = 'block'; return; }
+    results.replaceChildren(...res.map((r) => {
+      const row = el('div', { class: 'picker-result' }, [
+        el('div', { class: 'picker-result-name', textContent: r.name }),
+        el('div', { class: 'picker-result-detail', textContent: (r.dist != null ? fmtDist(r.dist) + ' ・ ' : '') + r.detail }),
+      ]);
+      row.addEventListener('click', () => { searchInput.value = r.name; setPicked(r.lat, r.lon, r.name, false); panTo(r.lat, r.lon, 16); });
+      return row;
+    }));
+    results.style.display = 'block';
+  };
+  searchBtn.addEventListener('click', runSearch);
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } });
+
+  locBtn.addEventListener('click', () => {
+    locBtn.textContent = '取得中…';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { locBtn.textContent = '📍 現在地'; setPicked(pos.coords.latitude, pos.coords.longitude, null, true); panTo(pos.coords.latitude, pos.coords.longitude, 16); },
+      () => { locBtn.textContent = '📍 現在地'; alert('現在地を取得できませんでした。'); }
+    );
+  });
+
+  overlay.append(
+    mapDiv,
+    el('div', { class: 'picker-search' }, [el('div', { class: 'picker-search-row' }, [searchInput, searchBtn]), results]),
+    locBtn,
+    el('div', { class: 'picker-sheet' }, [sheetTag, sheetName, el('div', { class: 'picker-bar' }, [cancelBtn, okBtn])]),
+  );
+  document.body.append(overlay);
+  updateSheet();
+
+  // 地図の初期化（Google が使えれば Google、ダメなら Leaflet）
+  const initGoogle = (google: any) => {
+    const map = new google.maps.Map(mapDiv, { center: { lat: start.lat, lng: start.lng }, zoom: initial ? 16 : 13, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+    let marker: any = null;
+    setPin = (lat, lng) => {
+      if (!marker) {
+        marker = new google.maps.Marker({ position: { lat, lng }, map, draggable: true });
+        marker.addListener('dragend', (e: any) => setPicked(e.latLng.lat(), e.latLng.lng(), null, true));
+      } else marker.setPosition({ lat, lng });
+    };
+    panTo = (lat, lng, zoom) => { map.panTo({ lat, lng }); if (zoom) map.setZoom(zoom); };
+    map.addListener('click', (e: any) => { if (e.placeId && e.stop) e.stop(); setPicked(e.latLng.lat(), e.latLng.lng(), null, true); });
+    if (picked) setPin(picked.lat, picked.lng);
+  };
+  const initLeaflet = () => {
+    const map = L.map(mapDiv).setView([start.lat, start.lng], initial ? 16 : 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+    let marker: any = null;
+    setPin = (lat, lng) => {
+      if (!marker) {
+        marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+        marker.on('dragend', () => { const p = marker.getLatLng(); setPicked(p.lat, p.lng, null, true); });
+      } else marker.setLatLng([lat, lng]);
+    };
+    panTo = (lat, lng, zoom) => map.setView([lat, lng], zoom ?? map.getZoom());
+    map.on('click', (e: any) => setPicked(e.latlng.lat, e.latlng.lng, null, true));
+    if (picked) setPin(picked.lat, picked.lng);
+    setTimeout(() => map.invalidateSize(), 100);
+  };
+  try {
+    const key = await getMapsKey();
+    if (!key) throw new Error('no key');
+    await loadGoogleMaps(key);
+    initGoogle((window as any).google);
+  } catch {
+    initLeaflet();
+  }
+
+  return promise;
+}
+
 // --- 詳細モーダル -----------------------------------------------------
 function openModal(d: TripDetail, r: Receipt, nameOf: (id: number | null) => string) {
   const breakdown = receiptBreakdown(r, d.members);
@@ -735,7 +869,8 @@ function receiptBreakdown(r: Receipt, members: Member[]) {
 function receiptForm(d: TripDetail, editing?: Receipt) {
   if (!d.members.length) return el('section', { class: 'card', id: 'receipt-form' }, [el('h2', { textContent: 'レシートを追加' }), el('p', { class: 'muted', textContent: '先にメンバーを追加してください。' })]);
 
-  let coords: { lat: number; lng: number } | null = null;
+  let coords: { lat: number; lng: number } | null =
+    editing && editing.lat != null && editing.lng != null ? { lat: editing.lat, lng: editing.lng } : null;
 
   const itemsWrap = el('div', { class: 'item-rows' });
   const addRow = () => itemsWrap.append(itemRow(d.members));
@@ -775,22 +910,27 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
   const paidBy = el('select', { name: 'paid_by' }, d.members.map((m) => el('option', { value: String(m.id), textContent: m.name })));
   if (editing?.paid_by != null) paidBy.value = String(editing.paid_by);
 
-  // 位置
+  // 位置（地図でピンを刺す／現在地）。tabikake 風の場所ピッカー。
   const locStatus = el('span', { class: 'muted' });
-  const geoBtn = el('button', { type: 'button', class: 'link-btn', textContent: '📍 現在地を取得' });
+  if (editing?.place_name) { locStatus.textContent = '📍 ' + editing.place_name; (store as any).dataset.place = editing.place_name; }
+  else if (coords) locStatus.textContent = `📍 (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`;
+
+  const applyLoc = (lat: number, lng: number, name: string | null) => {
+    coords = { lat, lng };
+    if (name) { (store as any).dataset.place = name; if (!store.value) store.value = name; }
+    locStatus.textContent = '📍 ' + (name || `(${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+  };
+
+  const mapBtn = el('button', { type: 'button', class: 'link-btn', textContent: '🗺 地図で選ぶ' });
+  mapBtn.addEventListener('click', async () => {
+    const r = await openMapPicker(coords);
+    if (r) applyLoc(r.lat, r.lng, r.name);
+  });
+  const geoBtn = el('button', { type: 'button', class: 'link-btn', textContent: '📍 現在地' });
   geoBtn.addEventListener('click', () => {
     locStatus.textContent = '取得中…';
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        locStatus.textContent = `取得しました (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`;
-        try {
-          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lng}`);
-          const j = await r.json();
-          if (j.name && !store.value) store.value = j.name;
-          (store as any).dataset.place = j.display_name || '';
-        } catch { /* 逆ジオは任意。失敗してもOK */ }
-      },
+      async (pos) => { const r = await reverseGeocode(pos.coords.latitude, pos.coords.longitude); applyLoc(pos.coords.latitude, pos.coords.longitude, r.name || null); },
       () => { locStatus.textContent = '位置情報を取得できませんでした'; }
     );
   });
@@ -824,7 +964,7 @@ function receiptForm(d: TripDetail, editing?: Receipt) {
     scanBanner,
     el('div', { class: 'row' }, [labeled('店名', store), labeled('カテゴリ', category)]),
     el('div', { class: 'row' }, [labeled('日付', date), labeled('払った人', paidBy)]),
-    el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置' }), el('div', { class: 'row' }, [geoBtn, locStatus])]),
+    el('div', { class: 'field' }, [el('span', { class: 'field-label', textContent: '位置（任意）' }), el('div', { class: 'row' }, [mapBtn, geoBtn, locStatus])]),
     el('h3', { textContent: '明細（負担者を選ぶ／「この明細だけ比率を指定」で品目別の比重も設定可）' }),
     itemsWrap,
     addItemBtn,
