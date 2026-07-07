@@ -7,5 +7,5 @@
     "outDir": "dist",
     "noEmit": false
   },
-  "include": ["src/server"]
+  "include": ["src/server", "src/shared"]
 }

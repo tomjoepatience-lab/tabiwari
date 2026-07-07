@@ -27,6 +27,47 @@ export type Analytics = {
   byTrip: { title: string; total: number }[];
 };
 export type TripPhoto = { id: number; receipt_id: number | null; caption: string | null; taken_on: string | null; sort_order: number };
+export type AppMode = 'kids' | 'adult';
+export type UserSettings = {
+  mode: AppMode;
+  monthly_income: number | null;
+  monthly_budget: number | null;
+  allowance: number | null;
+  balance_start: number;
+  coins: number;
+  xp: number;
+  level: number;
+  costume: string | null;
+  last_summary_shown: string | null; // 月初サマリーを表示済みの月（YYYY-MM）
+};
+export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean };
+export type Overview = {
+  settings: UserSettings | null;
+  month: { spend: number; income: number; byCategory: { category: string; total: number }[] };
+  wallet: number;
+  goals: SavingsGoal[];
+  todayRecorded: boolean;
+  challengeDone: boolean;
+  recordsCount: number;
+};
+export type QuickReward = { xp: number; coins: number; level: number; levelUp: boolean; challengeCleared: boolean } | null;
+export type RecentItem = { id: number; name: string; price: number; quantity: number; genre: string | null };
+export type RecentReceipt = {
+  id: number;
+  trip_id: number;
+  trip_title: string;
+  kind: ProjectKind;
+  store_name: string | null;
+  category: string | null;
+  purchased_on: string;
+  created_at: string;
+  lat: number | null;
+  lng: number | null;
+  place_name: string | null;
+  total: number;
+  items: RecentItem[];
+  photo_ids: number[];
+};
 export type PerMember = { memberId: number; name: string; paid: number; owed: number; net: number };
 export type Transfer = { from: number; to: number; amount: number };
 export type TripDetail = {
@@ -87,6 +128,31 @@ export const api = {
   generateRecurring: (tripId: number, month?: string) =>
     fetch(`/api/trips/${tripId}/recurring/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }).then((r) => json<{ created: number; skipped: number; month: string }>(r)),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
+  recentExpenses: (days = 30) =>
+    fetch(`/api/expenses/recent?days=${days}`).then((r) => json<{ receipts: RecentReceipt[] }>(r)),
+  quickExpense: (body: {
+    store_name?: string; category?: string; purchased_on: string;
+    items: { name: string; price: number; genre?: string }[];
+    lat?: number | null; lng?: number | null; place_name?: string | null;
+    photos?: string[];
+  }) =>
+    fetch('/api/expenses/quick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ receipt_id: number; trip_id: number; reward: QuickReward }>(r)),
+  setItemGenre: (id: number, genre: string) =>
+    fetch(`/api/items/${id}/genre`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ genre }) }).then((r) => json<{ id: number; genre: string }>(r)),
+  // モード・ゲーミフィケーション
+  overview: () => fetch('/api/overview').then((r) => json<Overview>(r)),
+  saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string }>) =>
+    fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<UserSettings>(r)),
+  addGoal: (body: { name: string; emoji?: string; target: number }) =>
+    fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<SavingsGoal>(r)),
+  deleteGoal: (id: number) => fetch(`/api/goals/${id}`, { method: 'DELETE' }),
+  depositGoal: (id: number, amount: number) =>
+    fetch(`/api/goals/${id}/deposit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount }) })
+      .then((r) => json<{ goal: SavingsGoal; reward: { xp: number; coins: number; done: boolean; level: number } }>(r)),
+  openPresent: () =>
+    fetch('/api/present', { method: 'POST' }).then((r) => json<{ costume: string; coins: number }>(r)),
+  addIncome: (body: { name?: string; amount: number; on_date?: string }) =>
+    fetch('/api/incomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number; name: string; amount: number; on_date: string }>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
   config: () => fetch('/api/config').then((r) => json<{ mapsKey: string }>(r)),
   // 思い出写真

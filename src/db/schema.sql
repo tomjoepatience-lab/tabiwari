@@ -41,8 +41,11 @@ CREATE TABLE IF NOT EXISTS items (
   receipt_id  INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   price       INTEGER NOT NULL CHECK (price > 0),
-  quantity    INTEGER NOT NULL DEFAULT 1
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  genre       TEXT                          -- 自動ジャンル分け（手直し可）。NULL=未分類
 );
+-- 既存DB向け（冪等）
+ALTER TABLE items ADD COLUMN IF NOT EXISTS genre TEXT;
 
 CREATE TABLE IF NOT EXISTS item_shares (
   item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -111,6 +114,49 @@ CREATE TABLE IF NOT EXISTS trip_photos (
 );
 -- 既存DB向け（冪等）
 ALTER TABLE trip_photos ADD COLUMN IF NOT EXISTS receipt_id INTEGER REFERENCES receipts(id) ON DELETE SET NULL;
+
+-- モード付きユーザー設定＋ゲーミフィケーション（こども=kids / おとな=adult） ----
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  mode           TEXT NOT NULL DEFAULT 'adult',   -- 'kids' | 'adult'
+  monthly_income INTEGER,                          -- おとな: 月収（表示用）
+  monthly_budget INTEGER,                          -- おとな: 月予算
+  allowance      INTEGER,                          -- こども: 月のおこづかい額
+  balance_start  INTEGER NOT NULL DEFAULT 0,       -- こども: おさいふの最初の金額
+  coins          INTEGER NOT NULL DEFAULT 0,       -- こども: ごほうびコイン
+  xp             INTEGER NOT NULL DEFAULT 0,       -- こども: 経験値（Lv導出）
+  costume        TEXT,                             -- マネコの衣装（beret/scarf）
+  last_challenge_date DATE,                        -- きょうのチャレンジ達成日
+  last_summary_shown TEXT,                         -- 月初サマリーを表示済みの月（YYYY-MM）
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- 既存DB向け（冪等）
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_summary_shown TEXT;
+
+-- ちょきん目標（こども/おとな共通。ゲーム機¥25,000 など）
+CREATE TABLE IF NOT EXISTS savings_goals (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  emoji      TEXT,
+  target     INTEGER NOT NULL CHECK (target > 0),
+  saved      INTEGER NOT NULL DEFAULT 0,
+  done       BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 収入（おとな=給料 / こども=おこづかい・おとしだま）
+CREATE TABLE IF NOT EXISTS incomes (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  amount     INTEGER NOT NULL CHECK (amount > 0),
+  on_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_user   ON savings_goals (user_id);
+CREATE INDEX IF NOT EXISTS idx_incomes_user ON incomes (user_id);
 
 CREATE INDEX IF NOT EXISTS idx_members_trip   ON members (trip_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_trip  ON receipts (trip_id);

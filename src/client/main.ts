@@ -1,15 +1,21 @@
-import { api, Group, Member, ProjectKind, Receipt, Trip, TripDetail, User } from './api';
+import { api, AppMode, Group, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User } from './api';
+import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
 import { openAlbum } from './album';
 import { reverseGeocode, searchPlaces, fmtDist } from './geo';
+import { ReactionKind } from './character';
+import { analyzeSpending, reactionFor } from './advice';
+import { kidsHome, kidsNavHtml, wireNav, KidsTab } from './kids';
+import { adultHome, adultNavHtml, stopChipRotation } from './adult';
+import { phoneCanvas, esc } from './phone';
+import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
+import { monthlyInsights, lastMonthSummary } from './insights';
 
 declare const L: any;
 declare const Chart: any;
 
 const CATEGORIES = ['食費', '交通', '宿泊', '観光', '買い物', 'その他'];
-const yen = (n: number) => '¥' + n.toLocaleString('ja-JP');
-const signedYen = (n: number) => (n >= 0 ? '+' : '−') + '¥' + Math.abs(n).toLocaleString('ja-JP');
 const app = () => document.getElementById('app')!;
 const byId = (id: string) => document.getElementById(id);
 
@@ -27,31 +33,38 @@ let currentUser: User | null = null;
 let myGroups: Group[] = [];
 let editingReceiptId: number | null = null;
 
-// --- DOM ヘルパー -----------------------------------------------------
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> & { class?: string } = {},
-  children: (Node | string)[] = []
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  const { class: cls, ...rest } = props as any;
-  if (cls) node.className = cls;
-  Object.assign(node, rest);
-  for (const c of children) node.append(typeof c === 'string' ? document.createTextNode(c) : c);
-  return node;
-}
+// ホームのタブの状態
+type HomeTab = 'home' | 'add' | 'report' | 'savings' | 'menu';
+let homeTab: HomeTab = 'home';
+let overviewCache: Overview | null = null;
+let recentCache: RecentReceipt[] | null = null;
+let calMonth = new Date();
+// 記録直後にマネコがお祝いするための持ち越し
+let pendingCelebrate: { kind: ReactionKind; name: string; reward?: QuickReward } | null = null;
+
+// DOM ヘルパーは ui.ts に共通化（el / yen / fmtDate / labeled / todayIso）
 
 // --- ルーティング -----------------------------------------------------
 async function route() {
   charts.forEach((c) => c.destroy());
   charts = [];
+  recentCache = null; // 画面遷移のたびに直近支出を取り直す（記録の追加を反映）
   if (mapInstance) { mapInstance.remove(); mapInstance = null; }
   const m = (location.hash || '#/').match(/^#\/trip\/(\d+)/);
   try {
     if (m) await renderTrip(Number(m[1]));
-    else await renderHome();
+    else { homeTab = 'home'; await renderHome(); } // トップに戻ったら必ずマネコのホームへ
   } catch (e) {
-    app().replaceChildren(el('p', { class: 'status err', textContent: (e as Error).message }));
+    // エラーでも行き止まりにしない（再読み込み・ホームへの動線を必ず出す）
+    const retry = el('button', { class: 'primary', textContent: 'もう一度読み込む' });
+    retry.addEventListener('click', () => { void route(); });
+    const home = el('button', { textContent: '🐱 ホームへ戻る' });
+    home.addEventListener('click', () => { location.hash = '#/'; void route(); });
+    app().replaceChildren(el('section', { class: 'card' }, [
+      el('h2', { textContent: 'うまく読み込めなかったにゃ…' }),
+      el('p', { class: 'status err', textContent: (e as Error).message }),
+      el('div', { class: 'row' }, [retry, home]),
+    ]));
   }
 }
 
@@ -70,21 +83,49 @@ function projectCard(t: Trip) {
   return el('a', { class: 'card trip-card', href: `#/trip/${t.id}` }, children);
 }
 
-// 5タブ・ナビ（記録/アルバムはプロジェクトへ、分析/グループはセクションへスクロール）
-function navBar(projects: Trip[]) {
-  const firstTrip = projects.find((p) => p.kind !== 'daily') ?? projects[0];
-  const items: [string, () => void, boolean][] = [
-    ['🏠 ホーム', () => window.scrollTo({ top: 0, behavior: 'smooth' }), true],
-    ['🧾 記録', () => { if (projects[0]) location.hash = `#/trip/${projects[0].id}`; else byId('projects-sec')?.scrollIntoView({ behavior: 'smooth' }); }, false],
-    ['📊 分析', () => byId('analysis-sec')?.scrollIntoView({ behavior: 'smooth' }), false],
-    ['📖 アルバム', () => { if (firstTrip) location.hash = `#/trip/${firstTrip.id}`; else byId('projects-sec')?.scrollIntoView({ behavior: 'smooth' }); }, false],
-    ['👪 グループ', () => byId('groups-sec')?.scrollIntoView({ behavior: 'smooth' }), false],
-  ];
-  return el('div', { class: 'nav' }, items.map(([label, fn, active]) => {
-    const b = el('button', { class: 'nav-item' + (active ? ' active' : ''), textContent: label });
-    b.addEventListener('click', fn);
+// ホーム以外のタブは、デザインと同じ 402×840 のスマホ画面キャンバスに
+// スクロール領域＋モード別タブバー（2a/3a 忠実移植）を重ねて表示する。
+function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLElement[] {
+  const bg = mode === 'kids' ? '#FFF3D6' : '#F7F4EE';
+  const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab) : adultNavHtml(active as KidsTab);
+  const html = `
+  <div style="position:relative;width:402px;height:840px;overflow:hidden;background:${bg};font-family:'M PLUS Rounded 1c', sans-serif">
+    <div class="pc-scroll"></div>
+    ${navHtml}
+  </div>`;
+  const { wrap, canvas } = phoneCanvas(html, { bg });
+  canvas.querySelector<HTMLElement>('.pc-scroll')!.append(...panels);
+  wireNav(canvas, (t) => { homeTab = t as HomeTab; void renderHome(); });
+  return [wrap];
+}
+
+// 初回だけ: こども / おとな のモード選択
+function renderModePicker() {
+  const pick = async (mode: AppMode) => {
+    try {
+      await api.saveSettings({ mode });
+      overviewCache = null;
+      homeTab = 'home';
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
+  };
+  const card = (mode: AppMode, emoji: string, title: string, desc: string) => {
+    const b = el('button', { class: 'mode-card mode-' + mode }, [
+      el('span', { class: 'mode-emoji', textContent: emoji }),
+      el('strong', { textContent: title }),
+      el('span', { class: 'mode-desc', textContent: desc }),
+    ]);
+    b.addEventListener('click', () => void pick(mode));
     return b;
-  }));
+  };
+  app().replaceChildren(el('section', { class: 'card mode-pick' }, [
+    el('h2', { textContent: '🐱 どっちのマネコにする?' }),
+    el('p', { class: 'muted', textContent: 'あとで「せってい / メニュー」からいつでも切りかえられます。' }),
+    el('div', { class: 'mode-grid' }, [
+      card('kids', '🏘️', 'こどもモード', 'マネコタウンでおこづかい・ちょきん・チャレンジ！ゲームみたいに楽しくきろく'),
+      card('adult', '💼', 'おとなモード', '予算・つかいみち・レポートが主役。マネコは小さな応援キャラに'),
+    ]),
+  ]));
 }
 
 // グループ管理（一覧・作成・招待コードで参加）
@@ -120,29 +161,549 @@ function groupsCard(groups: Group[]) {
   ]);
 }
 
+// 並行して走った古い renderHome が新しい画面を上書きしないための世代番号
+let renderEpoch = 0;
+
 async function renderHome() {
-  const [projects, groups] = await Promise.all([api.listTrips(), api.listGroups()]);
-  myGroups = groups;
+  const epoch = ++renderEpoch;
+  charts.forEach((c) => c.destroy());
+  charts = [];
+  stopChipRotation();
+  if (mapInstance) { try { mapInstance.remove(); } catch { /* noop */ } mapInstance = null; }
+
+  // overview はモード判定に必須。失敗したら復帰導線つきエラーを出す
+  try {
+    if (!overviewCache) overviewCache = await api.overview();
+  } catch (e) {
+    const retry = el('button', { class: 'primary', textContent: 'もう一度読み込む' });
+    retry.addEventListener('click', () => { void renderHome(); });
+    app().replaceChildren(el('section', { class: 'card' }, [
+      el('h2', { textContent: 'うまく読み込めなかったにゃ…' }),
+      el('p', { class: 'status err', textContent: (e as Error).message }),
+      retry,
+    ]));
+    return;
+  }
+  if (epoch !== renderEpoch) return; // すでに新しい描画が始まっている
+  const o = overviewCache;
+  if (!o.settings) { renderModePicker(); return; }
+  const mode: AppMode = o.settings.mode;
+  document.body.classList.toggle('theme-kids', mode === 'kids');
+  document.body.classList.toggle('theme-adult', mode === 'adult');
+
+  // 直近支出は取れなくてもホーム自体は必ず表示する
+  let recentFailed = false;
+  if (!recentCache) {
+    try { recentCache = (await api.recentExpenses(366)).receipts; }
+    catch { recentFailed = true; }
+  }
+  if (epoch !== renderEpoch) return; // ここまでの await 中に新しい描画が始まった
+  const recent = recentCache ?? [];
+  const insight = analyzeSpending(recent);
+  // お祝いはホーム描画のときだけ消費（他タブで無言消費させない）
+  const celebrate = homeTab === 'home' ? pendingCelebrate : null;
+  if (homeTab === 'home') pendingCelebrate = null;
+
+  const goTab = (t: KidsTab) => { homeTab = t as HomeTab; void renderHome(); };
+  const common = { overview: o, recent, insight, celebrate, goTab };
+
+  let panels: HTMLElement[];
+  if (homeTab === 'home') {
+    panels = mode === 'kids'
+      ? kidsHome({
+          ...common,
+          onPresent: async () => {
+            try {
+              const r = await api.openPresent();
+              overviewCache = null; // 次の描画でコイン残を反映
+              return r;
+            } catch (e) { alert((e as Error).message); return null; }
+          },
+        })
+      : adultHome({ ...common, insights: monthlyInsights(recent, o), onReceiptChanged: () => { overviewCache = null; } });
+    if (recentFailed) panels.push(el('p', { class: 'status err', textContent: '📡 通信が不安定で最近の記録を読めませんでした。再読み込みしてください。' }));
+  } else if (homeTab === 'add') {
+    panels = wrapPhone(mode, homeTab, quickAddPanel(mode));
+  } else if (homeTab === 'report') {
+    const sections = mode === 'adult'
+      ? [genreReportSec(recent), ...reportPanel(recent, false), calendarPanel(recent), mapPanel(recent)]
+      : [...reportPanel(recent, true), calendarPanel(recent, true)]; // こどもはジャンル手直しなし
+    panels = wrapPhone(mode, homeTab, sections);
+  } else if (homeTab === 'savings') {
+    panels = wrapPhone(mode, homeTab, savingsPanel(o, mode));
+  } else {
+    panels = wrapPhone(mode, homeTab, await settingsPanel(o, mode));
+  }
+
+  if (epoch !== renderEpoch) return; // 古い描画は捨てる（settingsPanel の await 対策）
+  app().replaceChildren(...panels);
+  window.scrollTo({ top: 0 });
+
+  // 月初: 先月のかんたんサマリー（おとな・その月はじめて開いたときだけ）
+  if (homeTab === 'home' && mode === 'adult') maybeShowMonthlySummary(o, recent, panels[0], recentFailed);
+}
+
+// 月初サマリーモーダル（表示したら settings に記録して二度出さない）
+function maybeShowMonthlySummary(o: Overview, recent: RecentReceipt[], anchor: HTMLElement | undefined, recentFailed = false) {
+  if (recentFailed) return; // データが読めなかった回では判定もフラグ保存もしない（次の成功時に再評価）
+  const now = new Date();
+  const thisYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (!anchor || o.settings?.last_summary_shown === thisYm) return;
+  const s = lastMonthSummary(recent, o, now);
+  // 記録済みフラグは「先月データが無い月」でも立てる（毎回判定しない）
+  void api.saveSettings({ last_summary_shown: thisYm }).then(() => {
+    if (overviewCache?.settings) overviewCache.settings.last_summary_shown = thisYm;
+  }).catch(() => { /* 次回また出るだけ */ });
+  if (!s) return;
+  const target = anchor.querySelector<HTMLElement>('.pc-canvas') ?? anchor;
+
+  const genreRows = s.topGenres.map((g, i) => {
+    const [bg, fg] = genreColor(g.genre);
+    const chip = el('span', { class: 'ms-chip', textContent: `${i + 1}. ${g.genre}` });
+    chip.style.background = bg; chip.style.color = fg;
+    return el('div', { class: 'ms-row' }, [chip, el('strong', { textContent: yen(g.total) })]);
+  });
+  const diff = s.prevTotal > 0 ? s.total - s.prevTotal : null;
+  const content = el('div', { class: 'ms-body' }, [
+    el('div', { class: 'ms-total-label', textContent: `${s.label}の支出` }),
+    el('div', { class: 'ms-total', textContent: yen(s.total) }),
+    diff != null ? el('div', { class: 'ms-diff', textContent: `前の月より ${signedYen(diff)}` }) : el('span'),
+    el('div', { class: 'ms-sec', textContent: 'つかいみち トップ3' }),
+    ...genreRows,
+    s.biggest ? el('div', { class: 'ms-note', textContent: `いちばん大きな買い物: ${s.biggest.store_name || s.biggest.items[0]?.name || ''} ${yen(s.biggest.total)}` }) : el('span'),
+    el('div', { class: 'ms-note', textContent: `記録した日数: ${s.recordDays}日` }),
+    el('div', { class: 'ms-comment', textContent: `🐱 ${s.comment}` }),
+    (() => {
+      const b = el('button', { class: 'primary big-add', textContent: '今月もがんばる' });
+      b.addEventListener('click', () => b.closest('.cm-overlay')?.remove());
+      return el('div', { class: 'center', style: 'margin-top:12px' as any }, [b]);
+    })(),
+  ]);
+  canvasModal(target, content, { title: `📖 ${s.label}のまとめ` });
+}
+
+// --- 🐷 ちょきん（目標・おこづかい/収入） --------------------------------
+function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
+  const kids = mode === 'kids';
+  const out: HTMLElement[] = [];
+
+  const savedAll = o.goals.reduce((a, g) => a + g.saved, 0);
+  out.push(el('section', { class: 'card sv-head' }, [
+    el('h2', { textContent: '🐷 ちょきん箱' }),
+    el('div', { class: 'sv-stats' }, [
+      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? 'おさいふ' : '使えるお金（記録上）' }), el('strong', { textContent: yen(o.wallet) })]),
+      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? 'ちょきんできた' : '貯金合計' }), el('strong', { textContent: yen(savedAll) })]),
+    ]),
+  ]));
+
+  // 収入（おこづかい / 給料）
+  const amount = el('input', { type: 'number', class: 'price', placeholder: '金額', min: '1', value: kids && o.settings?.allowance ? String(o.settings.allowance) : '' });
+  const nameIn = el('input', { class: 'grow', placeholder: kids ? 'おこづかい / おとしだま など' : '給料 / ボーナス など', value: kids ? 'おこづかい' : '給料' });
+  const incomeBtn = el('button', { class: 'primary', textContent: kids ? '＋ もらった！' : '＋ 収入を記録' });
+  incomeBtn.addEventListener('click', async () => {
+    const a = Math.round(Number(amount.value));
+    if (!Number.isFinite(a) || a <= 0) return alert('金額を入れてね');
+    try {
+      await api.addIncome({ name: nameIn.value.trim() || undefined, amount: a });
+      overviewCache = null;
+      pendingCelebrate = { kind: 'generic', name: nameIn.value.trim() || 'おこづかい' };
+      homeTab = 'home';
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
+  });
+  out.push(el('section', { class: 'card' }, [
+    el('h2', { textContent: kids ? '💰 おこづかい・もらったお金' : '💰 収入' }),
+    el('div', { class: 'row' }, [labeled('なまえ', nameIn), labeled('金額', amount), incomeBtn]),
+  ]));
+
+  // 目標一覧
+  const goalRows = o.goals.map((g) => {
+    const p = Math.min(100, Math.round((g.saved / g.target) * 100));
+    const fill = el('div', { class: 'sv-fill' + (g.done ? ' done' : '') });
+    fill.style.width = p + '%';
+    const dep = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくら入れる?' : '入金額', min: '1' });
+    const depBtn = el('button', { class: 'primary', textContent: kids ? 'ちょきんする' : '入金' });
+    depBtn.addEventListener('click', async () => {
+      const a = Math.round(Number(dep.value));
+      if (!Number.isFinite(a) || a <= 0) return alert('金額を入れてね');
+      if (kids && a > o.wallet && !confirm('おさいふに入っている金額より多いけど、だいじょうぶ?')) return;
+      try {
+        const r = await api.depositGoal(g.id, a);
+        overviewCache = null;
+        if (r.reward.done) alert(`🎉 もくひょう「${g.name}」たっせい！ ボーナス +50コイン +100XP`);
+        await renderHome();
+      } catch (e) { alert((e as Error).message); }
+    });
+    const del = el('button', { class: 'link-btn danger', textContent: '削除' });
+    del.addEventListener('click', async () => {
+      if (!confirm(`「${g.name}」を削除する?（ちょきんした分はおさいふに戻ります）`)) return;
+      await api.deleteGoal(g.id);
+      overviewCache = null;
+      await renderHome();
+    });
+    return el('div', { class: 'sv-goal' + (g.done ? ' done' : '') }, [
+      el('div', { class: 'sv-goal-head' }, [
+        el('strong', { textContent: `${g.emoji ?? '⭐'} ${g.name}` }),
+        el('span', { class: 'sv-goal-nums', textContent: `${yen(g.saved)} / ${yen(g.target)}（${p}%）` }),
+        g.done ? el('span', { class: 'sv-done-badge', textContent: 'たっせい！🎉' }) : del,
+      ]),
+      el('div', { class: 'sv-bar' }, [fill]),
+      g.done ? el('span') : el('div', { class: 'row' }, [dep, depBtn]),
+    ]);
+  });
+
+  // 新しい目標
+  const gName = el('input', { class: 'grow', placeholder: kids ? 'ほしいもの（れい: ゲームき）' : '目標（例: 旅行資金）' });
+  const gEmoji = el('select', {}, ['🎮', '⭐', '🚲', '✈️', '💻', '🎁', '📱', '👟'].map((e2) => el('option', { value: e2, textContent: e2 })));
+  const gTarget = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくらためる?' : '目標額', min: '1' });
+  const gBtn = el('button', { class: 'primary', textContent: '＋ もくひょうをつくる' });
+  gBtn.addEventListener('click', async () => {
+    const t = Math.round(Number(gTarget.value));
+    if (!gName.value.trim() || !Number.isFinite(t) || t <= 0) return alert('なまえと金額を入れてね');
+    try {
+      await api.addGoal({ name: gName.value.trim(), emoji: gEmoji.value, target: t });
+      overviewCache = null;
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
+  });
+  out.push(el('section', { class: 'card' }, [
+    el('h2', { textContent: kids ? '⭐ もくひょう' : '⭐ 貯金目標' }),
+    ...(goalRows.length ? goalRows : [el('p', { class: 'muted', textContent: kids ? 'ほしいものを「もくひょう」にして、ちょきんをはじめよう！' : '目標を作って貯金を見える化しましょう。' })]),
+    el('div', { class: 'row' }, [labeled('なまえ', gName), labeled('マーク', gEmoji), labeled('金額', gTarget), gBtn]),
+  ]));
+  return out;
+}
+
+// --- ⚙️ せってい / メニュー ------------------------------------------------
+async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]> {
+  const s = o.settings!;
+  const kids = mode === 'kids';
+
+  // モード切替
+  const modeBtn = el('button', { class: 'primary', textContent: kids ? '💼 おとなモードにきりかえ' : '🏘️ こどもモードにきりかえ' });
+  modeBtn.addEventListener('click', async () => {
+    await api.saveSettings({ mode: kids ? 'adult' : 'kids' });
+    overviewCache = null;
+    homeTab = 'home';
+    await renderHome();
+  });
+  const modeSec = el('section', { class: 'card' }, [
+    el('h2', { textContent: kids ? '⚙️ メニュー' : '⚙️ せってい' }),
+    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ Lv.${s.level} ・ ${s.coins}コイン ・ いまは${kids ? 'こども' : 'おとな'}モード` }),
+    modeBtn,
+  ]);
+
+  // お金の設定（モードで出し分け）
+  const budget = el('input', { type: 'number', class: 'price', value: s.monthly_budget != null ? String(s.monthly_budget) : '', placeholder: '例: 220000' });
+  const income = el('input', { type: 'number', class: 'price', value: s.monthly_income != null ? String(s.monthly_income) : '', placeholder: '例: 280000' });
+  const allowance = el('input', { type: 'number', class: 'price', value: s.allowance != null ? String(s.allowance) : '', placeholder: '例: 1000' });
+  const startBal = el('input', { type: 'number', class: 'price', value: String(s.balance_start ?? 0) });
+  const saveBtn = el('button', { class: 'primary', textContent: '保存' });
+  saveBtn.addEventListener('click', async () => {
+    const num = (i: HTMLInputElement) => (i.value.trim() === '' ? null : Math.round(Number(i.value)));
+    try {
+      await api.saveSettings(kids
+        ? { allowance: num(allowance), balance_start: num(startBal) ?? 0 }
+        : { monthly_budget: num(budget), monthly_income: num(income) });
+      overviewCache = null;
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
+  });
+  const moneySec = el('section', { class: 'card' }, [
+    el('h2', { textContent: kids ? '💰 おこづかいのせってい' : '💰 予算と収入' }),
+    el('div', { class: 'row' }, kids
+      ? [labeled('月のおこづかい', allowance), labeled('おさいふのスタート額', startBal), saveBtn]
+      : [labeled('月の予算', budget), labeled('月の収入（手取り）', income), saveBtn]),
+    el('p', { class: 'muted', textContent: kids
+      ? 'おこづかいをもらったら「ちょきん」タブの「＋もらった！」でおさいふに入るよ。'
+      : '予算を設定するとホームに「今月あと使える」が表示されます。' }),
+  ]);
+
+  const logout = el('button', { class: 'link-btn', textContent: 'ログアウト' });
+  logout.addEventListener('click', async () => {
+    await api.logout();
+    currentUser = null; myGroups = [];
+    overviewCache = null; recentCache = null;
+    document.body.classList.remove('theme-kids', 'theme-adult');
+    renderAuth();
+  });
+  const logoutSec = el('section', { class: 'card' }, [el('h2', { textContent: 'アカウント' }), logout]);
+
+  // 1アカウント・1デバイスのシンプル構成（プロジェクト/グループ管理はUIから外した）
+  return [modeSec, moneySec, logoutSec];
+}
+
+// --- ✏️ きろく（ワンタップ記録） ------------------------------------------
+const QUICK_CATEGORIES = ['食費', '日用品', '交通', '買い物', '観光', 'その他'];
+const KIDS_CATEGORIES = ['おかし', 'ごはん', 'おもちゃ・ゲーム', 'ほん・ぶんぼうぐ', 'そのほか'];
+
+function quickAddPanel(mode: AppMode): HTMLElement[] {
+  const kids = mode === 'kids';
+  // おとなは詳細フォーム（店・場所・写真・複数明細＋自動ジャンル）がデフォルト
+  if (!kids) {
+    return adultAddForm({
+      pickPlace: () => openMapPicker(null),
+      onSaved: (res) => {
+        pendingCelebrate = { kind: 'generic', name: res.name, reward: res.reward };
+        recentCache = null;
+        overviewCache = null;
+        homeTab = 'home';
+        void renderHome();
+      },
+    });
+  }
+  const cats = kids ? KIDS_CATEGORIES : QUICK_CATEGORIES;
+  let category = cats[0];
+
+  const priceInput = el('input', { class: 'quick-price', type: 'number', inputMode: 'numeric', placeholder: '0', min: '1' });
+  const nameInput = el('input', { class: 'grow', placeholder: kids ? 'なにをかった?（れい: おかし）' : 'なにを買った?（例: ラーメン、シャンプー）' });
+  const storeInput = el('input', { class: 'grow', placeholder: kids ? 'おみせ（なくてもOK）' : 'お店（なくてもOK）' });
+  const dateInput = el('input', { type: 'date', value: todayIso() });
+
+  // カテゴリはチップで1タップ選択
+  const chipRow = el('div', { class: 'chip-row' });
+  const drawChips = () => {
+    chipRow.replaceChildren(...cats.map((c) => {
+      const b = el('button', { type: 'button', class: 'qchip' + (category === c ? ' active' : ''), textContent: c });
+      b.addEventListener('click', () => { category = c; drawChips(); });
+      return b;
+    }));
+  };
+  drawChips();
+
+  // 追加の品（任意・軽量）
+  const extraRows: { name: HTMLInputElement; price: HTMLInputElement }[] = [];
+  const extraWrap = el('div', { class: 'stack' });
+  const addRowBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 品をふやす' });
+  addRowBtn.addEventListener('click', () => {
+    const n = el('input', { class: 'grow', placeholder: '品名' });
+    const p = el('input', { class: 'price', type: 'number', inputMode: 'numeric', placeholder: '金額', min: '1' });
+    extraRows.push({ name: n, price: p });
+    extraWrap.append(el('div', { class: 'row' }, [n, p]));
+  });
+
+  const saveBtn = el('button', { type: 'submit', class: 'primary big-add', textContent: kids ? '🐱 きろくする！' : '🐱 記録する' });
+  const form = el('form', { class: 'card quick-card' }, [
+    el('h2', { textContent: kids ? '✏️ おかいものメモ' : '✏️ きろく（かんたん記録）' }),
+    el('p', { class: 'muted', textContent: kids ? 'なまえと金額だけでOK。きろくするとマネコがよろこぶよ！' : '品名と金額だけでOK。マネコがホームで反応するよ。' }),
+    el('div', { class: 'quick-amount-row' }, [el('span', { class: 'quick-yen', textContent: '¥' }), priceInput]),
+    labeled('なにを買った?', nameInput),
+    chipRow,
+    extraWrap,
+    addRowBtn,
+    el('div', { class: 'row' }, [labeled('日付', dateInput), labeled('お店（任意）', storeInput)]),
+    el('div', { class: 'center' }, [saveBtn]),
+  ]);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    const price = Math.round(Number(priceInput.value));
+    const items = [{ name, price }, ...extraRows.map((r) => ({ name: r.name.value.trim(), price: Math.round(Number(r.price.value)) }))]
+      .filter((i) => i.name && Number.isFinite(i.price) && i.price > 0);
+    if (!items.length) { alert('品名と金額を入力してにゃ'); return; }
+    saveBtn.disabled = true;
+    try {
+      const res = await api.quickExpense({ store_name: storeInput.value.trim() || undefined, category, purchased_on: dateInput.value || todayIso(), items });
+      // ホームに戻ってマネコがお祝い（ごほうびも一緒に表示）
+      const pseudo = { store_name: storeInput.value, category, items, trip_title: '', purchased_on: dateInput.value } as unknown as RecentReceipt;
+      pendingCelebrate = { kind: reactionFor(pseudo), name: items[0].name, reward: res.reward };
+      recentCache = null;
+      overviewCache = null;
+      homeTab = 'home';
+      await renderHome();
+    } catch (err) {
+      alert((err as Error).message);
+      saveBtn.disabled = false;
+    }
+  });
+
+  if (kids) return [form];
+  // 詳細に記録したい人向けの入り口（割り勘・レシートOCR）
+  const advanced = el('section', { class: 'card' }, [
+    el('h2', { textContent: 'もっと詳しく記録したいとき' }),
+    el('p', { class: 'muted', textContent: 'レシート読み取り（OCR）・割り勘・地図ピンはプロジェクトの画面から使えます（せってい → プロジェクト）。' }),
+    (() => {
+      const b = el('button', { textContent: '🧳 せっていを開く' });
+      b.addEventListener('click', () => { homeTab = 'menu'; void renderHome(); });
+      return b;
+    })(),
+  ]);
+  return [form, advanced];
+}
+
+// --- 📅 カレンダー -------------------------------------------------------
+function calendarPanel(recent: RecentReceipt[], readonly = false): HTMLElement {
+  const byDay = new Map<string, { total: number; rows: RecentReceipt[] }>();
+  for (const r of recent) {
+    const day = r.purchased_on.slice(0, 10);
+    const e = byDay.get(day) ?? { total: 0, rows: [] };
+    e.total += r.total;
+    e.rows.push(r);
+    byDay.set(day, e);
+  }
+  const iso = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  const title = el('h2');
+  const grid = el('div', { class: 'cal-grid' });
+  const monthTotalEl = el('div', { class: 'cal-month-total' });
+
+  // 日付タップ → カードが出てきて明細・思い出写真が見られる
+  function showDay(day: string) {
+    const e = byDay.get(day);
+    const content = el('div', { class: 'cal-day-cards' },
+      e && e.rows.length
+        ? e.rows.map((r) => receiptCard(r, { readonly, onChanged: () => { overviewCache = null; } }))
+        : [el('p', { class: 'muted', textContent: 'この日の記録はありません。' })]);
+    canvasModal(grid, content, { title: fmtDate(day) + ' の記録' });
+  }
+
+  function rebuild() {
+    const y = calMonth.getFullYear(), m = calMonth.getMonth();
+    title.textContent = `${y}年${m + 1}月`;
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const now = new Date();
+    const todayIso = iso(now.getFullYear(), now.getMonth(), now.getDate());
+    const cells: HTMLElement[] = ['日', '月', '火', '水', '木', '金', '土'].map((w) => el('div', { class: 'cal-w', textContent: w }));
+    for (let i = 0; i < firstDow; i++) cells.push(el('div'));
+    let monthTotal = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const day = iso(y, m, d);
+      const e = byDay.get(day);
+      if (e) monthTotal += e.total;
+      const cell = el('button', { class: 'cal-cell' + (e ? ' has' : '') + (day === todayIso ? ' today' : '') }, [
+        el('span', { class: 'cal-d', textContent: String(d) }),
+        el('span', { class: 'cal-t', textContent: e ? yen(e.total) : '' }),
+      ]);
+      cell.addEventListener('click', () => showDay(day));
+      cells.push(cell);
+    }
+    grid.replaceChildren(...cells);
+    monthTotalEl.textContent = `月合計 ${yen(monthTotal)}`;
+  }
+  const prev = el('button', { class: 'cal-nav', textContent: '‹' });
+  const next = el('button', { class: 'cal-nav', textContent: '›' });
+  // 直近366日ぶんしか読み込んでいないので、それより前の月へは戻れないようにする
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - 366);
+  const minMonth = new Date(windowStart.getFullYear(), windowStart.getMonth(), 1);
+  const syncNav = () => { prev.disabled = calMonth <= minMonth; };
+  prev.addEventListener('click', () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); rebuild(); syncNav(); });
+  next.addEventListener('click', () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); rebuild(); syncNav(); });
+  rebuild();
+  syncNav();
+
+  return el('section', { class: 'card' }, [
+    el('div', { class: 'cal-head' }, [prev, title, next, el('span', { class: 'spacer' }), monthTotalEl]),
+    grid,
+    el('p', { class: 'muted', textContent: '※ 日付をタップすると明細と思い出写真がカードで開きます。' }),
+  ]);
+}
+
+// --- 📊 ジャンル別（今月・自動分類の結果） --------------------------------
+function genreReportSec(recent: RecentReceipt[]): HTMLElement {
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const map = new Map<string, number>();
+  for (const r of recent) {
+    if (!r.purchased_on.startsWith(ym)) continue;
+    for (const it of r.items) {
+      const g = it.genre ?? 'その他';
+      map.set(g, (map.get(g) ?? 0) + it.price);
+    }
+  }
+  const rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...rows.map(([, v]) => v));
+  const total = rows.reduce((s, [, v]) => s + v, 0);
+  return el('section', { class: 'card' }, [
+    el('h2', { textContent: `📊 今月のジャンル別（${now.getMonth() + 1}月 ・ ${yen(total)}）` }),
+    ...(rows.length
+      ? rows.map(([g, v]) => {
+          const [bg, fg] = genreColor(g);
+          const fill = el('div', { class: 'gr-fill' });
+          fill.style.width = Math.max(4, Math.round((v / max) * 86)) + '%';
+          fill.style.background = fg;
+          const chip = el('span', { class: 'gr-chip', textContent: g });
+          chip.style.background = bg;
+          chip.style.color = fg;
+          return el('div', { class: 'gr-row' }, [chip, el('div', { class: 'gr-bar' }, [fill]), el('span', { class: 'gr-amount', textContent: yen(v) })]);
+        })
+      : [el('p', { class: 'muted', textContent: '今月の記録はまだありません。' })]),
+    el('p', { class: 'muted', textContent: 'ジャンルは自動分類です。カレンダーの日付 → 明細をタップすると直せます。' }),
+  ]);
+}
+
+// --- 🗺 買い物マップ（ピン→タップで明細・写真） ---------------------------
+function mapPanel(recent: RecentReceipt[]): HTMLElement {
+  const pinned = recent.filter((r) => r.lat != null && r.lng != null);
+  const mapDiv = el('div', { class: 'report-map', id: 'report-map' });
+  const sec = el('section', { class: 'card' }, [
+    el('h2', { textContent: '🗺 買い物マップ' }),
+    pinned.length
+      ? mapDiv
+      : el('p', { class: 'muted', textContent: 'まだ場所つきの記録がありません。きろくの「🗺 場所を選ぶ」で買った場所にピンが立ちます。' }),
+    ...(pinned.length ? [el('p', { class: 'muted', textContent: 'ピンをタップすると、その買い物の明細と思い出写真が開きます。' })] : []),
+  ]);
+  if (pinned.length) {
+    requestAnimationFrame(() => {
+      if (!byId('report-map') || typeof L === 'undefined') return;
+      const map = L.map('report-map');
+      mapInstance = map;
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+      const markers = pinned.map((r) => {
+        const mk = L.marker([r.lat, r.lng]).addTo(map);
+        mk.on('click', () => canvasModal(sec, receiptCard(r, { onChanged: () => { overviewCache = null; } }))); // カード自身に店名が出る
+        return mk;
+      });
+      if (pinned.length === 1) map.setView([pinned[0].lat, pinned[0].lng], 15);
+      else map.fitBounds(L.featureGroup(markers).getBounds().pad(0.3));
+    });
+  }
+  return sec;
+}
+
+// --- 📊 レポート ---------------------------------------------------------
+function reportPanel(recent: RecentReceipt[], includeAnalytics = true): HTMLElement[] {
+  // 月次推移（直近6ヶ月・クライアント集計）
+  const byMonth = new Map<string, number>();
+  const labels: string[] = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    byMonth.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, 0);
+    labels.push(`${d.getMonth() + 1}月`);
+  }
+  for (const r of recent) {
+    const key = r.purchased_on.slice(0, 7);
+    if (byMonth.has(key)) byMonth.set(key, byMonth.get(key)! + r.total);
+  }
+  const trend = el('canvas');
+  const trendSec = el('section', { class: 'card' }, [
+    el('h2', { textContent: '📈 月次推移（直近6ヶ月）' }),
+    el('div', { class: 'chart-box wide' }, [trend]),
+  ]);
+  requestAnimationFrame(() => {
+    charts.push(new Chart(trend, {
+      type: 'bar',
+      data: { labels, datasets: [{ data: [...byMonth.values()], backgroundColor: '#C99B2E', borderRadius: 8 }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+    }));
+  });
+
+  if (!includeAnalytics) return [trendSec]; // おとなはジャンル別セクションがあるので横断チャートは出さない
+  const analysis = el('section', { class: 'card', id: 'analysis-sec' }, [
+    el('h2', { textContent: '📊 カテゴリ別' }),
+    el('p', { class: 'muted', textContent: '読み込み中…' }),
+  ]);
+  void renderAnalysis(analysis);
+  return [trendSec, analysis];
+}
+
+// --- 🧳 プロジェクト -----------------------------------------------------
+function projectsPanel(projects: Trip[], groups: Group[]): HTMLElement[] {
   const trips = projects.filter((p) => p.kind !== 'daily');
   const dailies = projects.filter((p) => p.kind === 'daily');
 
-  // 挨拶ヘッダー＋5タブナビ
-  const logout = el('button', { class: 'link-btn', textContent: 'ログアウト' });
-  logout.addEventListener('click', async () => { await api.logout(); currentUser = null; myGroups = []; renderAuth(); });
-  const greeting = el('section', { class: 'card' }, [
-    el('div', { class: 'greeting' }, [
-      el('div', { class: 'leaf', textContent: '🌿' }),
-      el('div', { class: 'greeting-text' }, [
-        el('strong', { textContent: `こんにちは、${currentUser?.username ?? ''}さん` }),
-        el('div', { class: 'muted', textContent: '我が家のお金、見える化中' }),
-      ]),
-      avatarEl(currentUser?.username ?? '?', 0, 'me-avatar'),
-    ]),
-    navBar(projects),
-    logout,
-  ]);
-
-  // 残高ヒーロー
   const totalAll = projects.reduce((s, p) => s + (p.total ?? 0), 0);
   const hero = el('section', { class: 'hero' }, [
     el('div', { class: 'hero-label', textContent: '支出合計（全プロジェクト）' }),
@@ -158,15 +719,15 @@ async function renderHome() {
   if (!groups.length) {
     form = el('section', { class: 'card' }, [
       el('h2', { textContent: '新しいプロジェクト' }),
-      el('p', { class: 'muted', textContent: '先に上でグループを作成（または参加）してください。プロジェクトはグループに属します。' }),
+      el('p', { class: 'muted', textContent: '先に「グループ」タブでグループを作成（または参加）してください。プロジェクトはグループに属します。' }),
     ]);
   } else {
     const kindSel = el('select', { name: 'kind' }, [
-      el('option', { value: 'trip', textContent: '旅行・イベント' }),
       el('option', { value: 'daily', textContent: '日常（普段使い）' }),
+      el('option', { value: 'trip', textContent: '旅行・イベント' }),
     ]);
     const groupSel = el('select', { name: 'group_id' }, groups.map((g) => el('option', { value: String(g.id), textContent: g.name })));
-    const title = el('input', { name: 'title', placeholder: '例: 沖縄2泊3日 ／ 我が家の家計簿', required: true });
+    const title = el('input', { name: 'title', placeholder: '例: わたしの家計簿 ／ 沖縄2泊3日', required: true });
     const start = el('input', { name: 'start_date', type: 'date' });
     const end = el('input', { name: 'end_date', type: 'date' });
     const dateWrap = el('div', { class: 'row' }, [labeled('開始', start), labeled('終了', end)]);
@@ -182,10 +743,12 @@ async function renderHome() {
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       await api.createTrip({ title: title.value, kind: kindSel.value as ProjectKind, group_id: Number(groupSel.value), start_date: start.value, end_date: end.value });
+      recentCache = null;
       await renderHome();
     });
     form = f;
   }
+  form.id = 'create-form';
 
   const section = (label: string, items: Trip[], empty: string) =>
     el('section', {}, [
@@ -201,15 +764,11 @@ async function renderHome() {
       b.addEventListener('click', () => byId('create-form')?.scrollIntoView({ behavior: 'smooth' }));
       return b;
     })()]),
-    section('🧳 旅行・イベント', trips, 'まだ旅行がありません。グループを選んで作成してください。'),
-    section('🏠 日常', dailies, 'まだ日常の家計簿がありません。種類で「日常」を選んで作成できます。'),
+    section('🏠 日常', dailies, 'まだ日常の家計簿がありません。下のフォームで「日常」を選んで作成できます。'),
+    section('🧳 旅行・イベント', trips, 'まだ旅行がありません。下のフォームから作成できます。'),
   ]);
 
-  const analysis = el('section', { class: 'card', id: 'analysis-sec' }, [el('h2', { textContent: '統括（全プロジェクト横断）' }), el('p', { class: 'muted', textContent: '読み込み中…' })]);
-  form.id = 'create-form';
-
-  app().replaceChildren(greeting, hero, projectsSec, analysis, groupsCard(groups), form);
-  void renderAnalysis(analysis);
+  return [hero, projectsSec, form];
 }
 
 async function renderAnalysis(section: HTMLElement) {
@@ -227,7 +786,7 @@ async function renderAnalysis(section: HTMLElement) {
       el('div', { class: 'chart-box' }, [el('h3', { textContent: 'プロジェクト別' }), trip]),
     ])
   );
-  const colors = ['#534ab7', '#1d9e75', '#d85a30', '#378add', '#ba7517', '#999'];
+  const colors = ['#C99B2E', '#8FA98F', '#C88A6A', '#7E93AE', '#E3C56A', '#B8AE9C'];
   charts.push(new Chart(cat, {
     type: 'doughnut',
     data: { labels: a.byCategory.map((c) => c.category), datasets: [{ data: a.byCategory.map((c) => c.total), backgroundColor: colors }] },
@@ -235,14 +794,16 @@ async function renderAnalysis(section: HTMLElement) {
   }));
   charts.push(new Chart(trip, {
     type: 'bar',
-    data: { labels: a.byTrip.map((t) => t.title), datasets: [{ data: a.byTrip.map((t) => t.total), backgroundColor: '#534ab7' }] },
+    data: { labels: a.byTrip.map((t) => t.title), datasets: [{ data: a.byTrip.map((t) => t.total), backgroundColor: '#C99B2E' }] },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
   }));
 }
 
 // --- 旅行詳細 ---------------------------------------------------------
 async function renderTrip(id: number) {
+  const epoch = ++renderEpoch; // ホームと同じ世代番号で、古い非同期描画の上書きを防ぐ
   const d = await api.getTrip(id);
+  if (epoch !== renderEpoch) return;
   const nameOf = (mid: number | null) => d.members.find((m) => m.id === mid)?.name ?? '—';
 
   const isTrip = d.trip.kind !== 'daily';
@@ -254,7 +815,7 @@ async function renderTrip(id: number) {
       : `日常（普段使い）・ 合計 ${yen(d.summary.total)}` }),
   ]);
   const headerChildren: (Node | string)[] = [
-    el('a', { class: 'back', href: '#/', textContent: '← ダッシュボード' }),
+    el('a', { class: 'back', href: '#/', textContent: '← ホーム' }),
     headerMain,
   ];
   if (isTrip) {
@@ -273,7 +834,13 @@ async function renderTrip(id: number) {
 
   const tabbar = el('nav', { class: 'tabbar' });
   const drawTabs = () => {
-    tabbar.replaceChildren(...tabDefs.map(([key, ico, label]) => {
+    // 先頭は常に「ホーム」＝マネコのいるトップへ戻る（迷子防止）
+    const homeBtn = el('button', { class: 'tabbar-item' }, [
+      el('span', { class: 'ti-ico', textContent: '🐱' }),
+      el('span', { textContent: 'ホーム' }),
+    ]);
+    homeBtn.addEventListener('click', () => { location.hash = '#/'; });
+    tabbar.replaceChildren(homeBtn, ...tabDefs.map(([key, ico, label]) => {
       const b = el('button', { class: 'tabbar-item' + (tripTab === key ? ' active' : '') }, [
         el('span', { class: 'ti-ico', textContent: ico }),
         el('span', { textContent: label }),
@@ -403,12 +970,12 @@ function chartsCard(d: TripDetail) {
     el('div', { class: 'chart-box' }, [el('h3', { textContent: '月次推移' }), monthCv]),
     el('div', { class: 'chart-box' }, [el('h3', { textContent: 'カテゴリ別' }), catCv]),
   ])]);
-  const colors = ['#534ab7', '#1d9e75', '#d85a30', '#378add', '#ba7517', '#999'];
+  const colors = ['#C99B2E', '#8FA98F', '#C88A6A', '#7E93AE', '#E3C56A', '#B8AE9C'];
   // canvas は DOM 追加後に描画する（次のマイクロタスク）
   Promise.resolve().then(() => {
     charts.push(new Chart(monthCv, {
       type: 'bar',
-      data: { labels: months.map((m) => m.replace('-', '/')), datasets: [{ data: months.map((m) => byMonth.get(m)), backgroundColor: '#534ab7' }] },
+      data: { labels: months.map((m) => m.replace('-', '/')), datasets: [{ data: months.map((m) => byMonth.get(m)), backgroundColor: '#C99B2E' }] },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
     }));
     charts.push(new Chart(catCv, {
@@ -686,7 +1253,7 @@ function renderLeafletMap(d: TripDetail, nameOf: (id: number | null) => string) 
   if (!pinned.length) { map.setView([35.68, 139.76], 4); return; }
   const markers = pinned.map((r) => {
     const mk = L.marker([r.lat, r.lng]).addTo(map);
-    mk.bindPopup(`<b>${r.store_name || '(店名なし)'}</b><br>${r.category || ''} ${yen(r.total)}`);
+    mk.bindPopup(`<b>${esc(r.store_name || '(店名なし)')}</b><br>${esc(r.category || '')} ${yen(r.total)}`);
     mk.on('click', () => openModal(d, r, nameOf));
     return mk;
   });
@@ -735,8 +1302,11 @@ async function openMapPicker(initial: { lat: number; lng: number } | null): Prom
     }
   };
 
+  let pickerMap: any = null; // Leaflet インスタンス（閉じるときに破棄しないとリスナーが残る）
   const finish = (result: Picked | null) => {
     document.removeEventListener('keydown', onKey);
+    try { pickerMap?.remove(); } catch { /* noop */ }
+    pickerMap = null;
     overlay.remove();
     resolveFn(result);
   };
@@ -801,6 +1371,7 @@ async function openMapPicker(initial: { lat: number; lng: number } | null): Prom
   };
   const initLeaflet = () => {
     const map = L.map(mapDiv).setView([start.lat, start.lng], initial ? 16 : 13);
+    pickerMap = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
     let marker: any = null;
     setPin = (lat, lng) => {
@@ -1049,12 +1620,8 @@ function itemRow(members: Member[], draft?: ItemDraft) {
 }
 
 // --- 共通 -------------------------------------------------------------
-function labeled(label: string, control: HTMLElement) {
-  return el('label', { class: 'field' }, [el('span', { class: 'field-label', textContent: label }), control]);
-}
 const th = (t: string) => el('th', { textContent: t });
 const td = (t: string) => el('td', { textContent: t });
-function fmtDate(s: string) { return s ? s.slice(0, 10).replace(/-/g, '/') : ''; }
 function dateRange(a: string | null, b: string | null) {
   if (!a && !b) return '日付未設定';
   return [a, b].filter(Boolean).map((x) => fmtDate(String(x))).join(' – ');

@@ -18,8 +18,11 @@ export const pool = new Pool(
     ? {
         connectionString,
         ssl: needsSsl(connectionString) ? { rejectUnauthorized: false } : undefined,
+        // CURRENT_DATE / date_trunc を日本時間基準にそろえる（Neon/Render は既定UTCで、
+        // 深夜の記録が「昨日」扱いになる月境界ズレを防ぐ）
+        options: '-c timezone=Asia/Tokyo',
       }
-    : {}
+    : { options: '-c timezone=Asia/Tokyo' }
 );
 
 // Neon 無料枠は無通信でサスペンドし、アイドル接続が切られることがある。
