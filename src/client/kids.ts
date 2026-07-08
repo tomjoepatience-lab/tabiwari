@@ -7,6 +7,7 @@ import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { canvasModal } from './records';
 import { monthlyNeeded } from './insights';
+import { journeyTotal, currentStage, journeyPercent, STAGES, openJourney } from './journey';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
@@ -109,6 +110,48 @@ export function manekoHtml(): string {
     </div>`;
 }
 
+// ステージ別のマネコ衣装。manekoHtml と同じ 300×370 座標系に重ねる。
+// 貯金の累計が進む（ステージが上がる）ほど、衣装がどんどん豪華になる。
+//   0 なし → 1 マフラー → 2 キャップ → 3 シルクハット＋蝶ネクタイ → 4 パイロット → 5 うちゅうヘルメット
+export function stageCostumeHtml(stage: number): string {
+  switch (stage) {
+    case 1: // マフラー
+      return `
+      <div style="position:absolute;left:104px;top:182px;width:92px;height:22px;border-radius:12px;background:repeating-linear-gradient(45deg,#E8483F 0 10px,#C7362F 10px 20px);box-shadow:0 3px 6px rgba(120,20,20,.3);z-index:3"></div>
+      <div style="position:absolute;left:150px;top:198px;width:22px;height:42px;border-radius:6px;background:repeating-linear-gradient(45deg,#E8483F 0 8px,#C7362F 8px 16px);transform:rotate(8deg);z-index:3"></div>
+      <div style="position:absolute;left:152px;top:236px;width:24px;height:7px;background:#B92626;border-radius:0 0 4px 4px;transform:rotate(8deg);z-index:3"></div>`;
+    case 2: // みどりのキャップ（ベレー）
+      return `
+      <div style="position:absolute;left:108px;top:34px;width:84px;height:36px;border-radius:50% 50% 46% 46%;background:radial-gradient(circle at 40% 30%,#6FC46F,#3E9E52);box-shadow:inset -6px -8px 10px rgba(20,80,30,.3);z-index:3"></div>
+      <div style="position:absolute;left:100px;top:58px;width:52px;height:14px;border-radius:8px;background:#2E7E3E;z-index:3"></div>
+      <div style="position:absolute;left:145px;top:28px;width:11px;height:11px;border-radius:50%;background:#2E7E3E;z-index:3"></div>`;
+    case 3: // シルクハット＋蝶ネクタイ（リッチ）
+      return `
+      <div style="position:absolute;left:104px;top:44px;width:92px;height:15px;border-radius:8px;background:#2E2A32;box-shadow:0 3px 6px rgba(20,20,30,.35);z-index:3"></div>
+      <div style="position:absolute;left:122px;top:6px;width:56px;height:40px;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#3A3640,#23202A);z-index:3"></div>
+      <div style="position:absolute;left:122px;top:38px;width:56px;height:8px;background:#E8483F;z-index:3"></div>
+      <div style="position:absolute;left:130px;top:188px;width:0;height:0;border-top:11px solid transparent;border-bottom:11px solid transparent;border-right:16px solid #E8483F;z-index:4"></div>
+      <div style="position:absolute;left:154px;top:188px;width:0;height:0;border-top:11px solid transparent;border-bottom:11px solid transparent;border-left:16px solid #E8483F;z-index:4"></div>
+      <div style="position:absolute;left:145px;top:192px;width:12px;height:14px;border-radius:3px;background:#B92626;z-index:4"></div>`;
+    case 4: // パイロット帽＋ゴーグル
+      return `
+      <div style="position:absolute;left:100px;top:38px;width:100px;height:42px;border-radius:50% 50% 40% 40%;background:radial-gradient(circle at 40% 30%,#8A6B4A,#5E4630);box-shadow:inset -6px -8px 10px rgba(40,25,10,.35);z-index:3"></div>
+      <div style="position:absolute;left:94px;top:60px;width:28px;height:32px;border-radius:0 0 8px 16px;background:#5E4630;z-index:3"></div>
+      <div style="position:absolute;left:178px;top:60px;width:28px;height:32px;border-radius:0 0 16px 8px;background:#5E4630;z-index:3"></div>
+      <div style="position:absolute;left:104px;top:100px;width:42px;height:36px;border-radius:50%;background:rgba(180,220,255,.5);border:4px solid #4E3A28;z-index:4"></div>
+      <div style="position:absolute;left:154px;top:100px;width:42px;height:36px;border-radius:50%;background:rgba(180,220,255,.5);border:4px solid #4E3A28;z-index:4"></div>
+      <div style="position:absolute;left:146px;top:112px;width:10px;height:8px;background:#4E3A28;z-index:4"></div>`;
+    case 5: // うちゅうヘルメット
+      return `
+      <div style="position:absolute;left:150px;top:38px;width:4px;height:20px;background:#C9D3DF;z-index:3"></div>
+      <div style="position:absolute;left:146px;top:30px;width:12px;height:12px;border-radius:50%;background:#E8483F;box-shadow:0 0 8px #E8483F;animation:msparkle 1.4s ease-in-out infinite;z-index:3"></div>
+      <div style="position:absolute;left:66px;top:52px;width:168px;height:162px;border-radius:50%;background:radial-gradient(circle at 35% 28%,rgba(200,235,255,.28),rgba(160,205,245,.14));border:5px solid #E6EEF6;box-shadow:inset -14px -10px 26px rgba(90,130,180,.25),0 0 20px rgba(180,220,255,.5);z-index:4"></div>
+      <div style="position:absolute;left:96px;top:190px;width:108px;height:26px;border-radius:14px;background:linear-gradient(180deg,#F5F7FA,#C9D3DF);box-shadow:inset 0 -3px 5px rgba(120,140,170,.35);z-index:5"></div>`;
+    default:
+      return '';
+  }
+}
+
 // 下部ナビ（2a のゲームふう・忠実移植）。active のラベルに金の下地。
 export function kidsNavHtml(active: KidsTab): string {
   const lbl = (tab: KidsTab, color: string, text: string) =>
@@ -175,6 +218,11 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   const goal = o.goals.find((g) => !g.done);
   const goalPct = goal ? Math.min(100, Math.round((goal.saved / goal.target) * 100)) : 0;
   const goalPace = goal ? monthlyNeeded(goal) : null;
+
+  // RPGの旅: 貯金の累計で決まる現在ステージ（衣装＆進捗％の元）
+  const jTotal = journeyTotal(o);
+  const jStage = currentStage(jTotal);
+  const jPct = journeyPercent(jTotal);
 
   // RPGふう進捗: ちょきんが進むほど街とマネコがリッチになる
   //   25%〜: 道ばたに花が咲く / 50%〜: 花がふえて旗が立つ / 75%〜: マネコに王冠 / 達成: おまつり(紙ふぶき)
@@ -360,6 +408,7 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     <!-- マネコ（描き込みリッチ版・75%で王冠） -->
     <div id="k-cat" style="position:absolute;left:50%;bottom:128px;width:300px;height:370px;transform:translateX(-50%) scale(.68);transform-origin:bottom center;cursor:pointer">
       ${manekoHtml()}
+      ${stageCostumeHtml(jStage)}
       ${crownHtml}
     </div>
 
@@ -436,6 +485,13 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
       <span style="font-size:11px;font-weight:800;color:#B9506E;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">ちょきんばこ</span>
     </div>
 
+    <!-- せかいをみる（RPGの旅マップへ）。現在ステージ＆％も表示 -->
+    <div id="k-journey" class="hv" style="position:absolute;left:50%;top:300px;transform:translateX(-50%);z-index:9;cursor:pointer;background:linear-gradient(180deg,#FFE9A8,#FFD54A);border:2.5px solid #E8B62B;border-radius:999px;padding:7px 15px;box-shadow:0 6px 16px rgba(150,95,10,.42);display:flex;align-items:center;gap:7px;white-space:nowrap">
+      <span style="font-size:15px">🗺</span>
+      <span style="font-size:12.5px;font-weight:800;color:#7A4A00">せかいを みにいく</span>
+      <span style="font-size:11px;font-weight:800;color:#B9506E;background:#FFF7DE;border-radius:999px;padding:1px 8px">${esc(STAGES[jStage].name)} ${jPct}%</span>
+    </div>
+
     <!-- おしらせトースト（長いセリフも折り返して全文表示） -->
     <div id="k-toast" style="position:absolute;left:50%;bottom:150px;transform:translateX(-50%);background:rgba(255,253,246,.97);border:2.5px solid #E8B62B;border-radius:18px;padding:8px 18px;font-size:13px;font-weight:800;color:#7A5A20;box-shadow:0 6px 16px rgba(120,80,20,.3);width:max-content;max-width:86%;text-align:center;line-height:1.5;opacity:0;transition:opacity .4s;z-index:15;pointer-events:none"></div>
 
@@ -507,6 +563,9 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   // チャレンジ → きろくへ / もくひょう → ちょきん箱へ
   canvas.querySelector('#k-challenge')?.addEventListener('click', () => { if (!o.challengeDone) a.goTab('add'); });
   canvas.querySelector('#k-goal')?.addEventListener('click', () => a.goTab('savings'));
+
+  // せかいをみる → RPGの旅マップ（フルスクリーン）
+  canvas.querySelector('#k-journey')?.addEventListener('click', () => openJourney(o));
 
   // 掲示板 → もくひょうづくりのカード
   const openGoalModal = (note?: string) => {

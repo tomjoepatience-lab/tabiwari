@@ -906,8 +906,13 @@ body.theme-adult .card { border: none; border-radius: 20px; box-shadow: 0 4px 14
 @keyframes mcloud { 0%,100%{transform:translateX(0)} 50%{transform:translateX(22px)} }
 @keyframes mbagbob { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(4deg)} }
 
-/* モックの提示背景と同じ生成りの上に、402×840 のスマホ画面を置く */
-body.theme-kids, body.theme-adult { background: #F6EFE2; }
+/* モックの提示背景と同じ生成りの上に、402×840 のスマホ画面を置く。
+   こどもは「世界そのものが背景」に見えるよう、フチを生成りではなく空→砂のグラデにする。 */
+body.theme-adult { background: #F6EFE2; }
+body.theme-kids {
+  background: linear-gradient(180deg,#7FC0F0 0%,#A8DCFA 24%,#FFE7B0 50%,#EFD3A0 72%,#D9AE6E 100%);
+  background-attachment: fixed;
+}
 .pc-wrap { display: flex; justify-content: center; }
 .pc-canvas {
   position: relative;
@@ -1127,3 +1132,64 @@ body.theme-kids .cm-close { background: #F0E4C8; color: #A08A60; }
 /* 金額入力(.price)のスピナー矢印も消す（ちょきん・収入の入力欄） */
 input.price::-webkit-outer-spin-button, input.price::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input.price { -moz-appearance: textfield; appearance: textfield; }
+
+/* ======================================================================
+   マネコのぼうけん（RPGふう たびマップ）— journey.ts
+   フルスクリーンの縦スクロール。貯金が進むと景色とマネコの衣装が変わる。
+   ====================================================================== */
+.jr-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: #070B22;                 /* トラック外（PC等の左右）はうちゅう色で letterbox */
+  font-family: 'M PLUS Rounded 1c', sans-serif;
+  opacity: 0;
+  transition: opacity .32s ease;
+}
+.jr-overlay.jr-in { opacity: 1; }
+.jr-overlay.jr-out { opacity: 0; }
+/* 入場ズームは overlay ではなく .jr-track にかける。
+   スクロールコンテナ(.jr-overlay)に transform を持たせると、その中の position:fixed
+   （.jr-top / .jr-foot）の包含ブロックを奪ってしまい、固定バーがスクロールで消える。
+   ズームをトラック側に移すことで overlay は transform なし＝固定バーはビューポート固定のまま。 */
+.jr-track {
+  box-shadow: 0 0 60px rgba(0,0,0,.35);
+  transform: scale(1.05); transform-origin: top center;
+  transition: transform .34s ease;
+}
+.jr-overlay.jr-in .jr-track { transform: none; }
+
+/* 上部固定バー（もどる／タイトル／％） */
+.jr-top {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 4100;
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+  background: linear-gradient(180deg, rgba(10,14,34,.72), rgba(10,14,34,0));
+  pointer-events: none;
+}
+.jr-top .jr-back {
+  pointer-events: auto;
+  border: none; cursor: pointer;
+  background: rgba(255,253,246,.95); color: #4A3B28;
+  font-weight: 800; font-size: 14px; font-family: inherit;
+  border-radius: 999px; padding: 8px 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+}
+.jr-title { color: #FFF7E6; font-weight: 800; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.jr-hud {
+  margin-left: auto;
+  background: #E8483F; color: #FFF8EC; font-weight: 800; font-size: 14px;
+  border-radius: 999px; padding: 6px 14px; box-shadow: 0 4px 12px rgba(150,20,20,.4);
+}
+
+/* 下部の現在地バナー */
+.jr-foot {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 4100;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgba(10,14,34,.8), rgba(10,14,34,0));
+  color: #FFF7E6; font-size: 13px; text-align: center;
+  pointer-events: none;
+}
+
+@keyframes mflame { from { transform: scaleY(.82); opacity: .85; } to { transform: scaleY(1.12); opacity: 1; } }

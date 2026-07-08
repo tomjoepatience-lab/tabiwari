@@ -7,6 +7,7 @@ import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
 import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids';
+import { closeJourney } from './journey';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
@@ -46,6 +47,7 @@ let pendingCelebrate: { kind: ReactionKind; name: string; reward?: QuickReward }
 
 // --- ルーティング -----------------------------------------------------
 async function route() {
+  closeJourney(); // 旅マップを開いたまま hashchange しても取り残さない
   charts.forEach((c) => c.destroy());
   charts = [];
   recentCache = null; // 画面遷移のたびに直近支出を取り直す（記録の追加を反映）
