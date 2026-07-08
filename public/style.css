@@ -918,6 +918,20 @@ body.theme-kids, body.theme-adult { background: #F6EFE2; }
   transform-origin: top center;
   flex: 0 0 auto;
 }
+/* fillHeight モード（きろく/レポート/ちょきん/せってい）: transform なしで幅いっぱい＋高さ画面フィット。
+   内側の .pc-scroll だけがスクロールする（body/二重スクロールを起こさない）。 */
+.pc-canvas.fill { width: 100%; max-width: 460px; height: auto; }
+
+/* テーマ表示中は main の余白を詰めてスマホ画面を全画面フィットに（body の二重スクロール防止）。
+   ホーム（絶対配置840px）で縦がはみ出す場合だけ body スクロールする。 */
+body.theme-kids main, body.theme-adult main {
+  margin: 0 auto;
+  padding: 4px 0;
+  max-width: 460px;
+  gap: 0;
+  min-height: 100dvh;
+  justify-content: flex-start;
+}
 .pc-scroll {
   position: absolute; inset: 0;
   overflow-y: auto;

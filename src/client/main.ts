@@ -88,14 +88,15 @@ function projectCard(t: Trip) {
 function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLElement[] {
   const bg = mode === 'kids' ? '#FFF3D6' : '#F7F4EE';
   const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab) : adultNavHtml(active as KidsTab);
-  const html = `
-  <div style="position:relative;width:402px;height:840px;overflow:hidden;background:${bg};font-family:'M PLUS Rounded 1c', sans-serif">
-    <div class="pc-scroll"></div>
-    ${navHtml}
-  </div>`;
-  const { wrap, canvas } = phoneCanvas(html, { bg });
+  // .pc-scroll とナビは canvas(.pc-canvas) の直下に置く。以前は 840px 固定の内側 div を
+  // 挟んでいたため、それが .pc-scroll の包含ブロックになって高さが 840 に固定され、
+  // fillHeight でキャンバスを縮めても下端（記録ボタン等）がナビの裏に隠れていた。
+  const html = `<div class="pc-scroll"></div>${navHtml}`;
+  // fillHeight: キャンバスを画面高さに合わせ、内側 .pc-scroll だけでスクロール（二重スクロール防止）
+  const { wrap, canvas, refit } = phoneCanvas(html, { bg, fillHeight: true });
   canvas.querySelector<HTMLElement>('.pc-scroll')!.append(...panels);
   wireNav(canvas, (t) => { homeTab = t as HomeTab; void renderHome(); });
+  refit(); // .pc-scroll を append した後で高さを確定させる
   return [wrap];
 }
 
