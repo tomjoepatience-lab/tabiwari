@@ -1,10 +1,12 @@
 // こどもモード「マネコタウン」ホーム — デザイン 2a (maneko-home-game-2a.dc.html) の忠実移植。
 // マークアップ・色・寸法・アニメーションはモックのまま、数値だけ実データを注入する。
 import { Overview, QuickReward, RecentReceipt } from './api';
-import { yen } from './ui';
+import { yen, el, labeled } from './ui';
 import { phoneCanvas, esc } from './phone';
 import { Insight } from './advice';
 import { ReactionKind } from './character';
+import { canvasModal } from './records';
+import { monthlyNeeded } from './insights';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
@@ -15,6 +17,14 @@ export interface KidsHomeArgs {
   celebrate: { kind: ReactionKind; name: string; reward?: QuickReward } | null;
   goTab(tab: KidsTab): void;
   onPresent(): Promise<{ costume: string; coins: number } | null>;
+  onDeposit(goalId: number, amount: number): void;      // 🐷ちょきんばこから
+  onCreateGoal(body: { name: string; emoji: string; target: number; deadline?: string }): void; // 掲示板から
+}
+
+// マネコのおしゃべりタイマー（renderHome が画面を作り直すたびに止める）
+let kidsTimer: number | undefined;
+export function stopKidsSpeech() {
+  if (kidsTimer) { clearInterval(kidsTimer); kidsTimer = undefined; }
 }
 
 // XPからレベル進捗（次のレベルまでの割合 0..1）
@@ -164,6 +174,44 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   const lvPct = Math.round(levelProgress(s.xp, s.level) * 100);
   const goal = o.goals.find((g) => !g.done);
   const goalPct = goal ? Math.min(100, Math.round((goal.saved / goal.target) * 100)) : 0;
+  const goalPace = goal ? monthlyNeeded(goal) : null;
+
+  // RPGふう進捗: ちょきんが進むほど街とマネコがリッチになる
+  //   25%〜: 道ばたに花が咲く / 50%〜: 花がふえて旗が立つ / 75%〜: マネコに王冠 / 達成: おまつり(紙ふぶき)
+  const rich = o.goals.some((g) => g.done) ? 100 : goalPct;
+  const flower = (color: string, x: string, y: number, s2 = 1) => `
+    <div style="position:absolute;${x};top:${y}px;transform:scale(${s2});z-index:3">
+      <div style="position:relative;width:26px;height:42px">
+        <div style="position:absolute;left:11px;top:14px;width:4px;height:26px;background:#3E9E6C;border-radius:2px"></div>
+        <div style="position:absolute;left:5px;top:26px;width:10px;height:5px;border-radius:50%;background:#3E9E6C;transform:rotate(-30deg)"></div>
+        <div style="position:absolute;left:3px;top:0;width:20px;height:20px;border-radius:50%;background:${color};box-shadow:0 2px 4px rgba(120,60,60,.3)"></div>
+        <div style="position:absolute;left:9px;top:6px;width:8px;height:8px;border-radius:50%;background:#FFF7C8"></div>
+      </div>
+    </div>`;
+  const richHtml = `
+    ${rich >= 25 ? flower('#F06292', 'left:66px', 636) + flower('#7A5BA8', 'right:74px', 596, 0.9) : ''}
+    ${rich >= 50 ? flower('#3E9E6C', 'left:96px', 566, 0.8) + `
+      <div style="position:absolute;right:40px;top:288px;z-index:3">
+        <div style="position:relative;width:40px;height:56px">
+          <div style="position:absolute;left:4px;top:0;width:4px;height:56px;background:linear-gradient(180deg,#D9A876,#94551F);border-radius:2px"></div>
+          <div style="position:absolute;left:8px;top:2px;width:0;height:0;border-top:9px solid transparent;border-bottom:9px solid transparent;border-left:26px solid #E8483F"></div>
+        </div>
+      </div>` : ''}
+    ${rich >= 100 ? `
+      <div style="position:absolute;left:120px;top:230px;width:10px;height:10px;background:#F06292;animation:msparkle 1.5s ease-in-out infinite;z-index:3"></div>
+      <div style="position:absolute;right:130px;top:200px;width:9px;height:9px;background:#7CC77A;animation:msparkle 1.5s ease-in-out infinite;animation-delay:-.5s;z-index:3"></div>
+      <div style="position:absolute;left:200px;top:180px;width:8px;height:8px;background:#7FB3DE;animation:msparkle 1.5s ease-in-out infinite;animation-delay:-1s;z-index:3"></div>` : ''}`;
+  // 王冠（75%〜）。マネコの頭上（300×370 のキャラ座標系）
+  const crownHtml = rich >= 75 ? `
+    <div style="position:absolute;left:122px;top:16px;z-index:4">
+      <div style="position:relative;width:56px;height:32px">
+        <div style="position:absolute;left:0;bottom:0;width:56px;height:14px;background:linear-gradient(180deg,#FFE28A,#D9A335);border-radius:3px"></div>
+        <div style="position:absolute;left:1px;bottom:12px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:14px solid #FFD54A"></div>
+        <div style="position:absolute;left:19px;bottom:12px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:18px solid #FFD54A"></div>
+        <div style="position:absolute;right:1px;bottom:12px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:14px solid #FFD54A"></div>
+        <div style="position:absolute;left:25px;bottom:4px;width:7px;height:7px;border-radius:50%;background:#E8483F"></div>
+      </div>
+    </div>` : '';
 
   // 買ったもの（最新2件をデザインの小物に割り当て）
   const buy1 = a.recent[0];
@@ -260,9 +308,13 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
           <div style="width:${goalPct}%;height:100%;border-radius:999px;background:linear-gradient(90deg,#7CC77A,#3E9E6C)"></div>
         </div>
         <span style="font-size:9.5px;font-weight:700;color:#A08A60">${yen(goal.saved)} / ${yen(goal.target)}</span>
+        ${goalPace && !goalPace.overdue ? `<span style="font-size:9.5px;font-weight:800;color:#B9506E">まいつき ${yen(goalPace.perMonth)} ずつ！</span>` : ''}
+        ` : o.goals.some((g) => g.done) ? `
+        <span style="font-size:10.5px;font-weight:800;color:#3E9E6C">たっせい！🎉 すごい！</span>
+        <span style="font-size:9.5px;font-weight:700;color:#A08A60">けいじばんで つぎの もくひょうを きめよう ›</span>
         ` : `
         <span style="font-size:10.5px;font-weight:800;color:#7A5A20">もくひょうをきめよう！</span>
-        <span style="font-size:9.5px;font-weight:700;color:#A08A60">ちょきん箱で「ほしいもの」をとうろく ›</span>
+        <span style="font-size:9.5px;font-weight:700;color:#A08A60">けいじばんを タップして とうろく ›</span>
         `}
       </div>
     </div>
@@ -302,9 +354,19 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     <div style="position:absolute;left:300px;top:-40px;animation:mfall 7.2s linear infinite;animation-delay:-3.1s;opacity:0">${coin(20)}</div>
     ` : ''}
 
-    <!-- マネコ（描き込みリッチ版） -->
+    <!-- 進捗ごほうび（花・旗・おまつり） -->
+    ${richHtml}
+
+    <!-- マネコ（描き込みリッチ版・75%で王冠） -->
     <div id="k-cat" style="position:absolute;left:50%;bottom:128px;width:300px;height:370px;transform:translateX(-50%) scale(.68);transform-origin:bottom center;cursor:pointer">
       ${manekoHtml()}
+      ${crownHtml}
+    </div>
+
+    <!-- マネコのふきだし（じぶんからおしゃべりする） -->
+    <div id="k-bubble" style="position:absolute;left:50%;top:346px;transform:translateX(-50%);z-index:8;background:#FFFDF6;border:2.5px solid #4A3B28;border-radius:16px;padding:8px 14px;max-width:245px;box-shadow:0 4px 12px rgba(60,40,20,.25);opacity:0;transition:opacity .35s;pointer-events:none">
+      <span id="k-bubble-text" style="font-size:12.5px;font-weight:800;color:#4A3B28;line-height:1.5"></span>
+      <div style="position:absolute;left:50%;bottom:-8px;width:13px;height:13px;background:#FFFDF6;border-right:2.5px solid #4A3B28;border-bottom:2.5px solid #4A3B28;transform:translateX(-50%) rotate(45deg)"></div>
     </div>
 
     <!-- 上部HUD（ゲームふう） -->
@@ -349,14 +411,29 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
       </div>
     </div>
 
-    <!-- 左右のタブボタン -->
-    <div data-nav="report" class="hv" style="position:absolute;left:10px;top:600px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">
-      <div style="width:52px;height:52px;border-radius:50%;background:rgba(255,253,246,.95);border:3px solid #E8B62B;box-shadow:0 6px 16px rgba(120,80,20,.3);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#E8791B">‹</div>
-      <span style="font-size:11px;font-weight:800;color:#6B5638;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">レポート</span>
+    <!-- 世界のしかけ: 掲示板（もくひょうづくり）と ぶたさんちょきんばこ -->
+    <div id="k-board" class="hv" style="position:absolute;left:10px;top:592px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;z-index:5">
+      <div style="position:relative;width:76px;height:66px">
+        <div style="position:absolute;left:12px;top:34px;width:8px;height:30px;background:linear-gradient(180deg,#B9743F,#94551F);border-radius:2px"></div>
+        <div style="position:absolute;right:12px;top:34px;width:8px;height:30px;background:linear-gradient(180deg,#B9743F,#94551F);border-radius:2px"></div>
+        <div style="position:absolute;left:0;top:0;width:76px;height:40px;background:linear-gradient(180deg,#D9A876,#B9895A);border:3px solid #8A4E1C;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#5A3A16;box-shadow:0 4px 8px rgba(120,70,20,.3)">もくひょう</div>
+        <div style="position:absolute;left:8px;top:6px;width:60px;height:3px;background:rgba(255,246,214,.5);border-radius:2px"></div>
+      </div>
+      <span style="font-size:11px;font-weight:800;color:#6B5638;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">けいじばん</span>
     </div>
-    <div data-nav="savings" class="hv" style="position:absolute;right:10px;top:600px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">
-      <div style="width:52px;height:52px;border-radius:50%;background:rgba(255,253,246,.95);border:3px solid #E8B62B;box-shadow:0 6px 16px rgba(120,80,20,.3);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#E8791B">›</div>
-      <span style="font-size:11px;font-weight:800;color:#6B5638;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">ちょきん箱</span>
+    <div id="k-pig" class="hv" style="position:absolute;right:10px;top:592px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;z-index:5">
+      <div style="position:relative;width:78px;height:62px">
+        <div style="position:absolute;left:6px;top:12px;width:66px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #FBD0E0, #F06292);box-shadow:inset -6px -8px 10px rgba(180,60,100,.28), 0 5px 10px rgba(180,60,100,.3)"></div>
+        <div style="position:absolute;left:16px;top:5px;width:15px;height:15px;background:#F06292;border-radius:50% 50% 0 50%;transform:rotate(12deg)"></div>
+        <div style="position:absolute;left:34px;top:8px;width:20px;height:5px;border-radius:3px;background:#B9506E"></div>
+        <div style="position:absolute;left:38px;top:-4px;width:15px;height:15px;border-radius:50%;border:2px solid #E8B62B;background:radial-gradient(circle at 35% 30%, #FFEFAE, #FFD54A 55%, #DFA318)"></div>
+        <div style="position:absolute;left:0;top:28px;width:19px;height:15px;border-radius:50%;background:#F8A8C0;border:2.5px solid #D96A8A"></div>
+        <div style="position:absolute;left:5px;top:33px;width:3px;height:4px;border-radius:2px;background:#B9506E"></div>
+        <div style="position:absolute;left:11px;top:33px;width:3px;height:4px;border-radius:2px;background:#B9506E"></div>
+        <div style="position:absolute;left:18px;top:54px;width:9px;height:8px;border-radius:0 0 4px 4px;background:#D96A8A"></div>
+        <div style="position:absolute;left:52px;top:54px;width:9px;height:8px;border-radius:0 0 4px 4px;background:#D96A8A"></div>
+      </div>
+      <span style="font-size:11px;font-weight:800;color:#B9506E;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">ちょきんばこ</span>
     </div>
 
     <!-- おしらせトースト（長いセリフも折り返して全文表示） -->
@@ -389,10 +466,30 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
       catShadow.style.animation = 'mshadow 3s ease-in-out infinite';
     }, 1400);
   };
+  // マネコのおしゃべり（吹き出し）。自分から順ぐりに話す＋タップでもひとこと
+  const bubble = canvas.querySelector<HTMLElement>('#k-bubble');
+  const bubbleText = canvas.querySelector<HTMLElement>('#k-bubble-text');
+  const say = (t: string) => {
+    if (!bubble || !bubbleText) return;
+    bubbleText.textContent = t;
+    bubble.style.opacity = '1';
+  };
   const TAP_LINES = ['にゃっ!?', 'きょうも きろく してくれて ありがとにゃ！', 'ちょきん がんばろうね！', 'いっしょに お金じょうずに なろうにゃ'];
+  let bi = 0;
+  const speakNext = () => {
+    if (!a.insight.messages.length) return;
+    say(a.insight.messages[bi % a.insight.messages.length]);
+    bi++;
+  };
+  stopKidsSpeech();
+  window.setTimeout(speakNext, a.celebrate ? 6000 : 900);
+  kidsTimer = window.setInterval(() => {
+    if (!bubble || !bubble.isConnected) { stopKidsSpeech(); return; }
+    speakNext();
+  }, 8000);
   canvas.querySelector('#k-cat')?.addEventListener('click', () => {
     jump();
-    showToast(TAP_LINES[Math.floor(Math.random() * TAP_LINES.length)]);
+    say(TAP_LINES[Math.floor(Math.random() * TAP_LINES.length)]);
   });
 
   // 記録直後のお祝い
@@ -410,6 +507,53 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   // チャレンジ → きろくへ / もくひょう → ちょきん箱へ
   canvas.querySelector('#k-challenge')?.addEventListener('click', () => { if (!o.challengeDone) a.goTab('add'); });
   canvas.querySelector('#k-goal')?.addEventListener('click', () => a.goTab('savings'));
+
+  // 掲示板 → もくひょうづくりのカード
+  const openGoalModal = (note?: string) => {
+    const gName = el('input', { class: 'grow', placeholder: 'ほしいもの（れい: ゲームき）' });
+    const gEmoji = el('select', {}, ['🎮', '⭐', '🚲', '🎁', '📱', '👟', '🧸', '✈️'].map((e2) => el('option', { value: e2, textContent: e2 })));
+    const gTarget = el('input', { type: 'number', class: 'price', placeholder: 'いくら？', min: '1' });
+    const gDeadline = el('input', { type: 'date' });
+    const btn = el('button', { class: 'primary big-add', textContent: '🪧 もくひょうを はる！' });
+    const body = el('div', { class: 'kd-form' }, [
+      ...(note ? [el('p', { class: 'muted', textContent: note })] : []),
+      labeled('ほしいもの', gName),
+      el('div', { class: 'row' }, [labeled('マーク', gEmoji), labeled('いくら？', gTarget)]),
+      labeled('いつまで？（なくてもOK）', gDeadline),
+      el('div', { class: 'center' }, [btn]),
+    ]);
+    const overlay = canvasModal(canvas, body, { title: '🪧 けいじばん' });
+    btn.addEventListener('click', () => {
+      const t = Math.round(Number(gTarget.value));
+      if (!gName.value.trim() || !Number.isFinite(t) || t <= 0) { alert('なまえと きんがくを いれてね'); return; }
+      overlay.remove();
+      a.onCreateGoal({ name: gName.value.trim(), emoji: gEmoji.value, target: t, deadline: gDeadline.value || undefined });
+    });
+  };
+  canvas.querySelector('#k-board')?.addEventListener('click', () => openGoalModal());
+
+  // ぶたさんちょきんばこ → ちょきんカード
+  canvas.querySelector('#k-pig')?.addEventListener('click', () => {
+    const undone = o.goals.filter((g) => !g.done);
+    if (!undone.length) { openGoalModal('まだ もくひょうが ないよ。さきに つくろう！'); return; }
+    const sel = el('select', {}, undone.map((g) => el('option', { value: String(g.id), textContent: `${g.emoji ?? '⭐'} ${g.name}（あと${yen(g.target - g.saved)}）` })));
+    const amt = el('input', { type: 'number', class: 'price', placeholder: 'いくら いれる？', min: '1' });
+    const btn = el('button', { class: 'primary big-add', textContent: '🐷 ちょきんする！' });
+    const body = el('div', { class: 'kd-form' }, [
+      el('p', { class: 'muted', textContent: `おさいふ: ${yen(o.wallet)}` }),
+      labeled('どの もくひょう？', sel),
+      labeled('きんがく', amt),
+      el('div', { class: 'center' }, [btn]),
+    ]);
+    const overlay = canvasModal(canvas, body, { title: '🐷 ぶたさんちょきんばこ' });
+    btn.addEventListener('click', () => {
+      const v = Math.round(Number(amt.value));
+      if (!Number.isFinite(v) || v <= 0) { alert('きんがくを いれてね'); return; }
+      if (v > o.wallet && !confirm('おさいふより おおいけど だいじょうぶ？')) return;
+      overlay.remove();
+      a.onDeposit(Number(sel.value), v);
+    });
+  });
 
   // プレゼント（30コインで衣装ガチャ）
   canvas.querySelector('#k-present')?.addEventListener('click', async () => {

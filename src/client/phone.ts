@@ -36,9 +36,16 @@ export function phoneCanvas(
       wrap.style.height = `${h}px`;
       // .pc-scroll は canvas 直下（inset:0）なので canvas 高さに自動で追従する。
     } else {
-      // ホーム（絶対配置 402×840）は横幅に合わせて等倍縮小。
+      // ホーム（絶対配置 402×840）は幅と高さの両方に収まるよう等倍縮小。
+      // 高さも見ることで「上下が見切れて body スクロールになる」のを防ぎ、ゲーム画面のように全体が見える。
+      // ただし入力フォーカス中（＝ソフトキーボードで innerHeight が縮む瞬間）は高さ再計算をスキップし、
+      // ホーム上のモーダル（けいじばん/ぶたさん貯金箱の入力）が極端に小さくなるのを防ぐ。
+      // モーダルは .pc-canvas の子なので、canvas を縮めると入力も一緒に縮んでしまうため。
+      const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
+      if (typing) return;
       const availW = Math.min(window.innerWidth, document.documentElement.clientWidth) - 12;
-      const scale = Math.min(1, availW / CANVAS_W);
+      const availH = window.innerHeight - 16;
+      const scale = Math.min(1, availW / CANVAS_W, availH / CANVAS_H);
       canvas.style.transform = `scale(${scale})`;
       canvas.style.height = `${CANVAS_H}px`;
       wrap.style.height = `${Math.round(CANVAS_H * scale)}px`;

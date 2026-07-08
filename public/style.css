@@ -1049,3 +1049,81 @@ body.theme-kids main, body.theme-adult main {
 /* 金額入力のスピナー矢印を消す（84pxの狭い欄を圧迫するため。テンキーは inputMode で維持） */
 .af-price::-webkit-outer-spin-button, .af-price::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .af-price { -moz-appearance: textfield; appearance: textfield; }
+
+/* ======================================================================
+   目標（期限・ペース・ホームのスワイプカード）＋ こども世界観の統一
+   ====================================================================== */
+/* PWA standalone でステータスバーに食い込まないように */
+body.theme-kids main, body.theme-adult main {
+  padding-top: calc(4px + env(safe-area-inset-top));
+  padding-bottom: calc(4px + env(safe-area-inset-bottom));
+}
+
+/* 貯金目標のペース表示（毎月あと¥X） */
+.sv-pace { margin: 2px 0 6px; font-size: 12px; font-weight: 700; color: #B9506E; }
+
+/* ホームの目標カード（スワイプ切替） */
+.ag-swipe {
+  display: flex; overflow-x: auto; gap: 10px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none; -ms-overflow-style: none;
+  cursor: pointer;
+}
+.ag-swipe::-webkit-scrollbar { display: none; }
+.ag-card {
+  flex: 0 0 100%; scroll-snap-align: start;
+  background: #FFFFFF; border-radius: 18px; padding: 12px 16px 10px;
+  box-shadow: 0 4px 14px rgba(60,50,30,.07);
+  display: flex; flex-direction: column; gap: 7px;
+}
+.ag-head { display: flex; justify-content: space-between; align-items: baseline; }
+.ag-name { font-size: 13px; font-weight: 800; color: #2E2A24; }
+.ag-pct { font-size: 12px; font-weight: 800; color: #C99B2E; }
+.ag-bar { height: 8px; border-radius: 999px; background: #F0EBE0; overflow: hidden; }
+.ag-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #E3C56A, #C99B2E); }
+.ag-sub { display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 700; color: #8C8375; }
+.ag-dots { display: flex; justify-content: center; gap: 6px; margin-top: 7px; }
+.ag-dot { width: 6px; height: 6px; border-radius: 999px; background: #D8D2C4; cursor: pointer; }
+.ag-dot.on { background: #C99B2E; }
+
+/* こども: 記録ボタンが金色ナビに隠れないよう余白を大きく */
+body.theme-kids .pc-scroll { padding-bottom: 215px; }
+
+/* こども: 全タブをマネコタウンの世界観に（クリーム＋金ふち＋丸文字） */
+body.theme-kids .pc-scroll .card {
+  background: #FFFDF6;
+  border: 2.5px solid #E8B62B;
+  border-radius: 18px;
+  box-shadow: 0 5px 14px rgba(120,80,20,.22);
+}
+body.theme-kids .pc-scroll h2 { color: #7A4A00; }
+body.theme-kids .pc-scroll h3 { color: #A08A60; }
+body.theme-kids .pc-scroll .muted { color: #A08A60; }
+body.theme-kids .pc-scroll .field-label { color: #A08A60; font-weight: 700; }
+body.theme-kids .pc-scroll input, body.theme-kids .pc-scroll select {
+  border: 2px solid #F0E4C8; border-radius: 12px; background: #FFFDF6;
+}
+body.theme-kids .pc-scroll input:focus, body.theme-kids .pc-scroll select:focus {
+  outline: 3px solid #FFF3CD; border-color: #E8B62B;
+}
+body.theme-kids .pc-scroll button.primary {
+  background: radial-gradient(circle at 35% 30%, #FFC94D, #F5A623);
+  border: 3px solid #FFFDF6; color: #7A4A00; font-weight: 800;
+  box-shadow: 0 5px 12px rgba(120,80,20,.35);
+}
+body.theme-kids .pc-scroll button.primary:hover { filter: brightness(1.04); }
+body.theme-kids .pc-scroll .sv-bar, body.theme-kids .pc-scroll .cal-cell { border-radius: 12px; }
+body.theme-kids .pc-scroll .cal-cell { border: 2px solid #F0E4C8; background: #FFFDF6; }
+body.theme-kids .pc-scroll .cal-cell.has { background: #FFF3CD; }
+body.theme-kids .pc-scroll .cal-cell.today { outline: 2.5px solid #E8B62B; }
+body.theme-kids .pc-scroll .gr-bar { background: #F0E4C8; }
+
+/* こどものモーダル（けいじばん・ちょきんばこ）も世界観に */
+body.theme-kids .cm-card { background: #FFFDF6; border: 3px solid #E8B62B; }
+body.theme-kids .cm-title { color: #7A4A00; }
+body.theme-kids .cm-close { background: #F0E4C8; color: #A08A60; }
+.kd-form { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+
+/* 金額入力(.price)のスピナー矢印も消す（ちょきん・収入の入力欄） */
+input.price::-webkit-outer-spin-button, input.price::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input.price { -moz-appearance: textfield; appearance: textfield; }

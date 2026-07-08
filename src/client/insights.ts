@@ -93,6 +93,24 @@ export function monthlyInsights(recent: RecentReceipt[], o: Overview, now = new 
   return out;
 }
 
+// ---- 期限つき目標: 「毎月あと¥Xずつで間に合う」の計算 --------------------
+export type PaceInfo = { months: number; perMonth: number; overdue: boolean };
+export function monthlyNeeded(
+  g: { target: number; saved: number; done?: boolean; deadline: string | null },
+  now = new Date()
+): PaceInfo | null {
+  if (!g.deadline || g.done || g.saved >= g.target) return null;
+  const dl = new Date(g.deadline + 'T00:00:00');
+  if (Number.isNaN(dl.getTime())) return null;
+  // 今月を1ヶ月目として期限月まで数える（期限が過去なら「今月中に」扱い＝毎月額は残額そのまま）
+  const raw = (dl.getFullYear() - now.getFullYear()) * 12 + (dl.getMonth() - now.getMonth()) + 1;
+  const months = Math.max(1, raw);
+  // overdue は「日単位」で判定する。月粒度だと当月内のすでに過ぎた日付を
+  // 「まだ間に合う」と表示してしまうため（例: 今日7/8・期限7/1）。期限当日はまだセーフ。
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return { months, perMonth: Math.ceil((g.target - g.saved) / months), overdue: dl.getTime() < today.getTime() };
+}
+
 // ---- 月初の先月サマリー -------------------------------------------------
 export type MonthSummary = {
   ym: string;            // 対象月（先月）YYYY-MM

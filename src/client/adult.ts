@@ -7,6 +7,7 @@ import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { KidsTab } from './kids';
 import { receiptCard, canvasModal } from './records';
+import { monthlyNeeded } from './insights';
 
 export interface AdultHomeArgs {
   overview: Overview;
@@ -163,8 +164,36 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
   }
   const chipText = a.celebrate ? `「${a.celebrate.name.slice(0, 8)}」を記録しました ✓` : lines[0];
 
-  // つかいみち（今月カテゴリ上位4件・最大値比）
-  const cats = o.month.byCategory.slice(0, 4);
+  // ホームに出す目標（スワイプで切替）。未達成を優先、全部達成済みなら最新1枚
+  const activeGoals = o.goals.filter((g) => !g.done);
+  const goalCards = activeGoals.length ? activeGoals : o.goals.slice(0, 1);
+  const hasGoals = goalCards.length > 0;
+  const goalsHtml = hasGoals ? `
+    <!-- 目標（スワイプ切替） -->
+    <div style="position:absolute;left:20px;right:20px;top:344px">
+      <div class="ag-swipe" id="ag-swipe">
+        ${goalCards.map((g) => {
+          const p = Math.min(100, Math.round((g.saved / g.target) * 100));
+          const pace = monthlyNeeded(g);
+          const sub = g.done ? 'たっせい！🎉'
+            : pace ? (pace.overdue ? `期限超過 ・ あと${yen(g.target - g.saved)}` : `期限 ${g.deadline!.slice(0, 7).replace('-', '/')} ・ 毎月あと${yen(pace.perMonth)}`)
+            : `あと ${yen(g.target - g.saved)}`;
+          return `
+          <div class="ag-card">
+            <div class="ag-head"><span class="ag-name">${esc((g.emoji ?? '🎯') + ' ' + g.name.slice(0, 10))}</span><span class="ag-pct">${p}%</span></div>
+            <div class="ag-bar"><div class="ag-fill" style="width:${Math.max(4, p)}%"></div></div>
+            <div class="ag-sub"><span>${yen(g.saved)} / ${yen(g.target)}</span><span>${esc(sub)}</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${goalCards.length > 1 ? `<div class="ag-dots">${goalCards.map((_, i) => `<span class="ag-dot${i === 0 ? ' on' : ''}" data-dot="${i}"></span>`).join('')}</div>` : ''}
+    </div>` : '';
+  // 目標カードがある分だけ下のセクションを詰める（つかいみち3件・最近2件）
+  const catsTop = hasGoals ? 452 : 356;
+  const recentTop = hasGoals ? 608 : 546;
+
+  // つかいみち（今月カテゴリ上位・最大値比）
+  const cats = o.month.byCategory.slice(0, hasGoals ? 3 : 4);
   const maxCat = Math.max(1, ...cats.map((c2) => c2.total));
   const catRows = cats.map((c2, i) => `
     <div style="display:grid;grid-template-columns:76px 1fr 72px;align-items:center;gap:10px">
@@ -188,7 +217,8 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
     if (d === yIso) return 'きのう';
     return `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   };
-  const rows = a.recent.slice(0, 3);
+  // 目標カードがあるときは下に詰まるので2件、ないときは3件（下部ナビと重ねない）
+  const rows = a.recent.slice(0, hasGoals ? 2 : 3);
   // アイコンは支配的なジャンル（金額最大）で決め、つかいみちバーの順位色と対応させる
   const domGenre = (r: RecentReceipt) => {
     const m = new Map<string, number>();
@@ -251,8 +281,10 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
       </div>
     </div>
 
+    ${goalsHtml}
+
     <!-- カテゴリ -->
-    <div style="position:absolute;left:20px;right:20px;top:356px;display:flex;flex-direction:column;gap:10px">
+    <div style="position:absolute;left:20px;right:20px;top:${catsTop}px;display:flex;flex-direction:column;gap:10px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <span style="font-size:14px;font-weight:800">つかいみち</span>
         <span id="a-see-all" style="font-size:11.5px;font-weight:700;color:#C99B2E;cursor:pointer">すべて見る ›</span>
@@ -263,7 +295,7 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
     </div>
 
     <!-- 最近の記録 -->
-    <div style="position:absolute;left:20px;right:20px;top:546px;display:flex;flex-direction:column;gap:10px">
+    <div style="position:absolute;left:20px;right:20px;top:${recentTop}px;display:flex;flex-direction:column;gap:10px">
       <span style="font-size:14px;font-weight:800">最近の記録</span>
       <div style="background:#FFFFFF;border-radius:20px;padding:6px 18px;box-shadow:0 4px 14px rgba(60,50,30,.07);display:flex;flex-direction:column">
         ${recentRows || '<span style="font-size:12.5px;font-weight:700;color:#8C8375;padding:12px 0">まだ記録がありません。まんなかの「きろく」から始めましょう</span>'}
@@ -279,6 +311,22 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
   });
   canvas.querySelector('#a-see-all')?.addEventListener('click', () => a.goTab('report'));
   canvas.querySelector('#a-set-budget')?.addEventListener('click', () => { if (budget == null) a.goTab('menu'); });
+
+  // 目標スワイパー: スクロールでドット更新・ドットタップで移動・カードタップでちょきんへ
+  const swipe = canvas.querySelector<HTMLElement>('#ag-swipe');
+  if (swipe) {
+    swipe.addEventListener('click', () => a.goTab('savings'));
+    const dots = [...canvas.querySelectorAll<HTMLElement>('.ag-dot')];
+    if (dots.length) {
+      swipe.addEventListener('scroll', () => {
+        const i = Math.round(swipe.scrollLeft / Math.max(1, swipe.clientWidth));
+        dots.forEach((d, j) => d.classList.toggle('on', j === i));
+      }, { passive: true });
+      dots.forEach((d) => d.addEventListener('click', () => {
+        swipe.scrollTo({ left: Number(d.dataset.dot) * swipe.clientWidth, behavior: 'smooth' });
+      }));
+    }
+  }
   // 最近の記録タップ → 見やすい明細カード（カード自身に店名が出るのでタイトルは重複させない）
   canvas.querySelectorAll<HTMLElement>('[data-rid]').forEach((n) => {
     n.addEventListener('click', () => {

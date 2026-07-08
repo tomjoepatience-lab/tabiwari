@@ -728,7 +728,7 @@ api.get('/overview', async (req, res) => {
               COALESCE(SUM(amount), 0)::int AS total
          FROM incomes WHERE user_id = $1`, [userId]);
     const goalsQ = await pool.query(
-      `SELECT id, name, emoji, target, saved, done FROM savings_goals WHERE user_id = $1 ORDER BY done, id DESC`, [userId]);
+      `SELECT id, name, emoji, target, saved, done, deadline FROM savings_goals WHERE user_id = $1 ORDER BY done, id DESC`, [userId]);
     const savedAll = goalsQ.rows.reduce((a, g) => a + g.saved, 0);
     const challengeQ = await pool.query(
       `SELECT (last_challenge_date = CURRENT_DATE) AS done FROM user_settings WHERE user_id = $1`, [userId]);
@@ -804,21 +804,36 @@ api.put('/items/:id/genre', async (req, res) => {
 
 // ちょきん目標
 api.post('/goals', async (req, res) => {
-  const { name, emoji, target } = req.body ?? {};
+  const { name, emoji, target, deadline } = req.body ?? {};
   const t = Math.round(Number(target));
-  if (typeof name !== 'string' || !name.trim() || !Number.isFinite(t) || t <= 0) {
+  // target は PostgreSQL の integer 上限（2^31-1）未満に制限。超えると INSERT で例外になる。
+  if (typeof name !== 'string' || !name.trim() || !Number.isFinite(t) || t <= 0 || t > 2_000_000_000) {
     return res.status(400).json({ error: '目標の名前と金額を入れてね' });
   }
-  const { rows } = await pool.query(
-    `INSERT INTO savings_goals (user_id, name, emoji, target) VALUES ($1, $2, $3, $4)
-     RETURNING id, name, emoji, target, saved, done`,
-    [uid(req), name.trim(), typeof emoji === 'string' ? emoji.slice(0, 4) : null, t]
-  );
-  res.status(201).json(rows[0]);
+  // deadline は形式だけでなく暦日として実在するかも検証（2026-13-99 / 2026-02-30 等を弾く）。
+  let dl: string | null = null;
+  if (typeof deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(deadline)) {
+    const d = new Date(deadline + 'T00:00:00Z');
+    if (!Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === deadline) dl = deadline;
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO savings_goals (user_id, name, emoji, target, deadline) VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, emoji, target, saved, done, deadline`,
+      [uid(req), name.trim(), typeof emoji === 'string' ? emoji.slice(0, 4) : null, t, dl]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    serverError(res, e);
+  }
 });
 api.delete('/goals/:id', async (req, res) => {
-  await pool.query(`DELETE FROM savings_goals WHERE id = $1 AND user_id = $2`, [Number(req.params.id), uid(req)]);
-  res.status(204).end();
+  try {
+    await pool.query(`DELETE FROM savings_goals WHERE id = $1 AND user_id = $2`, [Number(req.params.id), uid(req)]);
+    res.status(204).end();
+  } catch (e) {
+    serverError(res, e);
+  }
 });
 // ちょきんする（入金）。達成したらボーナス（コイン+50 / XP+100）
 api.post('/goals/:id/deposit', async (req, res) => {

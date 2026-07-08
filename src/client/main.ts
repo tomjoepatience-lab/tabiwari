@@ -6,11 +6,11 @@ import { openAlbum } from './album';
 import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
-import { kidsHome, kidsNavHtml, wireNav, KidsTab } from './kids';
+import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
-import { monthlyInsights, lastMonthSummary } from './insights';
+import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
 
 declare const L: any;
 declare const Chart: any;
@@ -86,7 +86,10 @@ function projectCard(t: Trip) {
 // ホーム以外のタブは、デザインと同じ 402×840 のスマホ画面キャンバスに
 // スクロール領域＋モード別タブバー（2a/3a 忠実移植）を重ねて表示する。
 function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLElement[] {
-  const bg = mode === 'kids' ? '#FFF3D6' : '#F7F4EE';
+  // こどもはどのタブでもマネコタウンの空〜砂の世界観で統一する
+  const bg = mode === 'kids'
+    ? 'linear-gradient(180deg,#5FB2EE 0%,#A8DCFA 24%,#FFE2A0 44%,#FFD489 54%,#EFD3A0 70%,#D9AE6E 100%)'
+    : '#F7F4EE';
   const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab) : adultNavHtml(active as KidsTab);
   // .pc-scroll とナビは canvas(.pc-canvas) の直下に置く。以前は 840px 固定の内側 div を
   // 挟んでいたため、それが .pc-scroll の包含ブロックになって高さが 840 に固定され、
@@ -170,6 +173,7 @@ async function renderHome() {
   charts.forEach((c) => c.destroy());
   charts = [];
   stopChipRotation();
+  stopKidsSpeech();
   if (mapInstance) { try { mapInstance.remove(); } catch { /* noop */ } mapInstance = null; }
 
   // overview はモード判定に必須。失敗したら復帰導線つきエラーを出す
@@ -220,6 +224,25 @@ async function renderHome() {
               return r;
             } catch (e) { alert((e as Error).message); return null; }
           },
+          // 🐷ちょきんばこから入金（達成したらボーナスのお知らせ）
+          onDeposit: async (goalId, amount) => {
+            try {
+              const r = await api.depositGoal(goalId, amount);
+              overviewCache = null;
+              pendingCelebrate = { kind: 'generic', name: `¥${amount.toLocaleString('ja-JP')}ちょきん` };
+              if (r.reward.done) alert('🎉 もくひょう たっせい！ ボーナス +50コイン +100XP');
+              await renderHome();
+            } catch (e) { alert((e as Error).message); }
+          },
+          // 掲示板からもくひょう作成
+          onCreateGoal: async (body) => {
+            try {
+              await api.addGoal(body);
+              overviewCache = null;
+              pendingCelebrate = { kind: 'generic', name: `もくひょう「${body.name.slice(0, 6)}」` };
+              await renderHome();
+            } catch (e) { alert((e as Error).message); }
+          },
         })
       : adultHome({ ...common, insights: monthlyInsights(recent, o), onReceiptChanged: () => { overviewCache = null; } });
     if (recentFailed) panels.push(el('p', { class: 'status err', textContent: '📡 通信が不安定で最近の記録を読めませんでした。再読み込みしてください。' }));
@@ -227,8 +250,8 @@ async function renderHome() {
     panels = wrapPhone(mode, homeTab, quickAddPanel(mode));
   } else if (homeTab === 'report') {
     const sections = mode === 'adult'
-      ? [genreReportSec(recent), ...reportPanel(recent, false), calendarPanel(recent), mapPanel(recent)]
-      : [...reportPanel(recent, true), calendarPanel(recent, true)]; // こどもはジャンル手直しなし
+      ? [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent), mapPanel(recent)]
+      : [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, true)]; // こどももジャンル別（手直しなし）
     panels = wrapPhone(mode, homeTab, sections);
   } else if (homeTab === 'savings') {
     panels = wrapPhone(mode, homeTab, savingsPanel(o, mode));
@@ -322,6 +345,15 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     const p = Math.min(100, Math.round((g.saved / g.target) * 100));
     const fill = el('div', { class: 'sv-fill' + (g.done ? ' done' : '') });
     fill.style.width = p + '%';
+    // 期限つきなら「毎月あと¥X」ペース表示
+    const pace = monthlyNeeded(g);
+    const paceLine = pace
+      ? el('p', { class: 'sv-pace', textContent: pace.overdue
+          ? (kids ? `きげんが すぎてるよ！あと ${yen(g.target - g.saved)}` : `期限を過ぎています（あと ${yen(g.target - g.saved)}）`)
+          : (kids
+              ? `${fmtDate(g.deadline!)} までに たっせいするには、まいつき ${yen(pace.perMonth)} ずつ！`
+              : `期限 ${fmtDate(g.deadline!)} ・ 今のペースなら毎月あと ${yen(pace.perMonth)} でOK（残り${pace.months}ヶ月）`) })
+      : null;
     const dep = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくら入れる?' : '入金額', min: '1' });
     const depBtn = el('button', { class: 'primary', textContent: kids ? 'ちょきんする' : '入金' });
     depBtn.addEventListener('click', async () => {
@@ -349,20 +381,22 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
         g.done ? el('span', { class: 'sv-done-badge', textContent: 'たっせい！🎉' }) : del,
       ]),
       el('div', { class: 'sv-bar' }, [fill]),
+      ...(paceLine ? [paceLine] : []),
       g.done ? el('span') : el('div', { class: 'row' }, [dep, depBtn]),
     ]);
   });
 
-  // 新しい目標
+  // 新しい目標（期限は任意。設定すると「毎月あと¥X」を出す）
   const gName = el('input', { class: 'grow', placeholder: kids ? 'ほしいもの（れい: ゲームき）' : '目標（例: 旅行資金）' });
   const gEmoji = el('select', {}, ['🎮', '⭐', '🚲', '✈️', '💻', '🎁', '📱', '👟'].map((e2) => el('option', { value: e2, textContent: e2 })));
   const gTarget = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくらためる?' : '目標額', min: '1' });
-  const gBtn = el('button', { class: 'primary', textContent: '＋ もくひょうをつくる' });
+  const gDeadline = el('input', { type: 'date' });
+  const gBtn = el('button', { class: 'primary', textContent: kids ? '＋ もくひょうをつくる' : '＋ 目標をつくる' });
   gBtn.addEventListener('click', async () => {
     const t = Math.round(Number(gTarget.value));
     if (!gName.value.trim() || !Number.isFinite(t) || t <= 0) return alert('なまえと金額を入れてね');
     try {
-      await api.addGoal({ name: gName.value.trim(), emoji: gEmoji.value, target: t });
+      await api.addGoal({ name: gName.value.trim(), emoji: gEmoji.value, target: t, deadline: gDeadline.value || undefined });
       overviewCache = null;
       await renderHome();
     } catch (e) { alert((e as Error).message); }
@@ -370,7 +404,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   out.push(el('section', { class: 'card' }, [
     el('h2', { textContent: kids ? '⭐ もくひょう' : '⭐ 貯金目標' }),
     ...(goalRows.length ? goalRows : [el('p', { class: 'muted', textContent: kids ? 'ほしいものを「もくひょう」にして、ちょきんをはじめよう！' : '目標を作って貯金を見える化しましょう。' })]),
-    el('div', { class: 'row' }, [labeled('なまえ', gName), labeled('マーク', gEmoji), labeled('金額', gTarget), gBtn]),
+    el('div', { class: 'row' }, [labeled('なまえ', gName), labeled('マーク', gEmoji), labeled('金額', gTarget), labeled(kids ? 'いつまで？（なくてもOK）' : '期限（任意）', gDeadline), gBtn]),
   ]));
   return out;
 }
@@ -664,7 +698,7 @@ function mapPanel(recent: RecentReceipt[]): HTMLElement {
 }
 
 // --- 📊 レポート ---------------------------------------------------------
-function reportPanel(recent: RecentReceipt[], includeAnalytics = true): HTMLElement[] {
+function reportPanel(recent: RecentReceipt[]): HTMLElement[] {
   // 月次推移（直近6ヶ月・クライアント集計）
   const byMonth = new Map<string, number>();
   const labels: string[] = [];
@@ -691,13 +725,7 @@ function reportPanel(recent: RecentReceipt[], includeAnalytics = true): HTMLElem
     }));
   });
 
-  if (!includeAnalytics) return [trendSec]; // おとなはジャンル別セクションがあるので横断チャートは出さない
-  const analysis = el('section', { class: 'card', id: 'analysis-sec' }, [
-    el('h2', { textContent: '📊 カテゴリ別' }),
-    el('p', { class: 'muted', textContent: '読み込み中…' }),
-  ]);
-  void renderAnalysis(analysis);
-  return [trendSec, analysis];
+  return [trendSec]; // カテゴリ内訳は genreReportSec（ジャンル別）が担う
 }
 
 // --- 🧳 プロジェクト -----------------------------------------------------
@@ -770,34 +798,6 @@ function projectsPanel(projects: Trip[], groups: Group[]): HTMLElement[] {
   ]);
 
   return [hero, projectsSec, form];
-}
-
-async function renderAnalysis(section: HTMLElement) {
-  const a = await api.analytics();
-  if (!a.byCategory.length) {
-    section.replaceChildren(el('h2', { textContent: '統括（全プロジェクト横断）' }), el('p', { class: 'muted', textContent: 'データがまだありません。' }));
-    return;
-  }
-  const cat = el('canvas');
-  const trip = el('canvas');
-  section.replaceChildren(
-    el('h2', { textContent: '統括（全プロジェクト横断）' }),
-    el('div', { class: 'charts' }, [
-      el('div', { class: 'chart-box' }, [el('h3', { textContent: 'カテゴリ別' }), cat]),
-      el('div', { class: 'chart-box' }, [el('h3', { textContent: 'プロジェクト別' }), trip]),
-    ])
-  );
-  const colors = ['#C99B2E', '#8FA98F', '#C88A6A', '#7E93AE', '#E3C56A', '#B8AE9C'];
-  charts.push(new Chart(cat, {
-    type: 'doughnut',
-    data: { labels: a.byCategory.map((c) => c.category), datasets: [{ data: a.byCategory.map((c) => c.total), backgroundColor: colors }] },
-    options: { plugins: { legend: { position: 'bottom' } } },
-  }));
-  charts.push(new Chart(trip, {
-    type: 'bar',
-    data: { labels: a.byTrip.map((t) => t.title), datasets: [{ data: a.byTrip.map((t) => t.total), backgroundColor: '#C99B2E' }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
-  }));
 }
 
 // --- 旅行詳細 ---------------------------------------------------------

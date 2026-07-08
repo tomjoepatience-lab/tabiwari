@@ -142,8 +142,11 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   target     INTEGER NOT NULL CHECK (target > 0),
   saved      INTEGER NOT NULL DEFAULT 0,
   done       BOOLEAN NOT NULL DEFAULT FALSE,
+  deadline   DATE,                          -- 期限（任意）。「毎月あと¥X」の計算に使う
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 既存DB向け（冪等）
+ALTER TABLE savings_goals ADD COLUMN IF NOT EXISTS deadline DATE;
 
 -- 収入（おとな=給料 / こども=おこづかい・おとしだま）
 CREATE TABLE IF NOT EXISTS incomes (

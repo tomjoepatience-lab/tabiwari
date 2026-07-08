@@ -40,7 +40,7 @@ export type UserSettings = {
   costume: string | null;
   last_summary_shown: string | null; // 月初サマリーを表示済みの月（YYYY-MM）
 };
-export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean };
+export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean; deadline: string | null };
 export type Overview = {
   settings: UserSettings | null;
   month: { spend: number; income: number; byCategory: { category: string; total: number }[] };
@@ -143,7 +143,7 @@ export const api = {
   overview: () => fetch('/api/overview').then((r) => json<Overview>(r)),
   saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string }>) =>
     fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<UserSettings>(r)),
-  addGoal: (body: { name: string; emoji?: string; target: number }) =>
+  addGoal: (body: { name: string; emoji?: string; target: number; deadline?: string }) =>
     fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<SavingsGoal>(r)),
   deleteGoal: (id: number) => fetch(`/api/goals/${id}`, { method: 'DELETE' }),
   depositGoal: (id: number, amount: number) =>
