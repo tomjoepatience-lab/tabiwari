@@ -371,7 +371,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     });
     const del = el('button', { class: 'link-btn danger', textContent: '削除' });
     del.addEventListener('click', async () => {
-      if (!confirm(`「${g.name}」を削除する?（ちょきんした分はおさいふに戻ります）`)) return;
+      if (!confirm(`「${g.name}」を削除する?（ちょきんした分はおさいふに戻ります。ぼうけんマップの すすみも そのぶん もどります）`)) return;
       await api.deleteGoal(g.id);
       overviewCache = null;
       await renderHome();
@@ -1674,6 +1674,8 @@ function renderAuth() {
 }
 
 async function boot() {
+  // 旅マップを開いたままリロードした残留エントリを消費（戻る1回が無反応になるのを防ぐ）
+  if ((history.state as any)?.jr) history.back();
   const me = await api.me().catch(() => null);
   if (!me) { currentUser = null; renderAuth(); return; }
   currentUser = me.user;

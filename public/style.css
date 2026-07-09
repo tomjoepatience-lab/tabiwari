@@ -75,6 +75,19 @@ input:focus, select:focus { outline: 2px solid var(--accent-weak); border-color:
 input.grow { flex: 1; min-width: 140px; }
 input.price { width: 110px; }
 
+/* 日付入力: iOS Safari のネイティブ装飾（内側の枠/影・値のはみ出し）を消して
+   指定した枠にきちんと収める。値は中央寄せ・高さは他の入力とそろえる。 */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: calc(1.6em + 20px);
+  text-align: center;
+  line-height: 1.2;
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: center; margin: 0; }
+input[type="date"]::-webkit-datetime-edit { padding: 0; }
+input[type="date"]::-webkit-calendar-picker-indicator { margin-left: 6px; }
+
 button {
   font: inherit;
   padding: 9px 16px;
@@ -1091,8 +1104,9 @@ body.theme-kids main, body.theme-adult main {
 .ag-dot { width: 6px; height: 6px; border-radius: 999px; background: #D8D2C4; cursor: pointer; }
 .ag-dot.on { background: #C99B2E; }
 
-/* こども: 記録ボタンが金色ナビに隠れないよう余白を大きく */
-body.theme-kids .pc-scroll { padding-bottom: 215px; }
+/* こども: 記録ボタンが金色ナビに隠れないよう余白を大きく（iPhone のホームインジケータぶんも足す）。
+   下端に十分な余白があると、保存ボタンをスクロールでナビより上へ持ってこられる。 */
+body.theme-kids .pc-scroll { padding-bottom: calc(250px + env(safe-area-inset-bottom)); }
 
 /* こども: 全タブをマネコタウンの世界観に（クリーム＋金ふち＋丸文字） */
 body.theme-kids .pc-scroll .card {
@@ -1141,55 +1155,52 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   position: fixed; inset: 0; z-index: 4000;
   overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  background: #070B22;                 /* トラック外（PC等の左右）はうちゅう色で letterbox */
+  background: #BFD3E8;                 /* 中央402ステージ外（PC等の左右）はデザインのフレーム色 */
   font-family: 'M PLUS Rounded 1c', sans-serif;
   opacity: 0;
   transition: opacity .32s ease;
 }
-.jr-overlay.jr-in { opacity: 1; }
-.jr-overlay.jr-out { opacity: 0; }
-/* 入場ズームは overlay ではなく .jr-track にかける。
+/* overlay 自体に transform を持たせない（opacityフェードのみ）。
    スクロールコンテナ(.jr-overlay)に transform を持たせると、その中の position:fixed
-   （.jr-top / .jr-foot）の包含ブロックを奪ってしまい、固定バーがスクロールで消える。
-   ズームをトラック側に移すことで overlay は transform なし＝固定バーはビューポート固定のまま。 */
-.jr-track {
-  box-shadow: 0 0 60px rgba(0,0,0,.35);
-  transform: scale(1.05); transform-origin: top center;
-  transition: transform .34s ease;
-}
-.jr-overlay.jr-in .jr-track { transform: none; }
+   （.jr-top / .jr-foot）の包含ブロックを奪ってしまい、固定バーがスクロールで消えるため。 */
+.jr-overlay.jr-in { opacity: 1; }
+.jr-overlay.jr-out { opacity: 0; pointer-events: none; }
 
-/* 上部固定バー（もどる／タイトル／％） */
+/* 上部固定バー（もどる／タイトル／％）— v2 の見た目 */
 .jr-top {
   position: fixed; top: 0; left: 0; right: 0; z-index: 4100;
   display: flex; align-items: center; gap: 10px;
-  padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
-  background: linear-gradient(180deg, rgba(10,14,34,.72), rgba(10,14,34,0));
+  padding: calc(40px + env(safe-area-inset-top)) 14px 12px;
+  background: linear-gradient(180deg, rgba(191,211,232,.96), rgba(191,211,232,0));
   pointer-events: none;
 }
 .jr-top .jr-back {
   pointer-events: auto;
   border: none; cursor: pointer;
-  background: rgba(255,253,246,.95); color: #4A3B28;
+  background: #FFFDF6; color: #5C4A2E;
   font-weight: 800; font-size: 14px; font-family: inherit;
-  border-radius: 999px; padding: 8px 16px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  border-radius: 999px; padding: 8px 15px 8px 12px;
+  box-shadow: 0 4px 12px rgba(80,60,20,.2);
 }
-.jr-title { color: #FFF7E6; font-weight: 800; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.jr-title {
+  display: flex; align-items: center; gap: 6px;
+  color: #2E2A24; font-weight: 800; font-size: 16px;
+  text-shadow: 0 1px 0 rgba(255,255,255,.6);
+}
 .jr-hud {
   margin-left: auto;
-  background: #E8483F; color: #FFF8EC; font-weight: 800; font-size: 14px;
-  border-radius: 999px; padding: 6px 14px; box-shadow: 0 4px 12px rgba(150,20,20,.4);
+  background: linear-gradient(180deg, #FF7A5C, #D8382C);
+  color: #FFF; font-weight: 800; font-size: 15px;
+  border-radius: 999px; padding: 7px 15px; box-shadow: 0 4px 12px rgba(180,50,40,.35);
 }
 
-/* 下部の現在地バナー */
+/* 下部の現在地バナー — v2（白フェードは内側の inline が担当。ここは固定枠だけ） */
 .jr-foot {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 4100;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
-  background: linear-gradient(0deg, rgba(10,14,34,.8), rgba(10,14,34,0));
-  color: #FFF7E6; font-size: 13px; text-align: center;
   pointer-events: none;
 }
 
 @keyframes mflame { from { transform: scaleY(.82); opacity: .85; } to { transform: scaleY(1.12); opacity: 1; } }
+@keyframes mpulse { 0%,100%{transform:translateX(-50%) scale(1);box-shadow:0 0 0 0 rgba(216,60,44,.5)} 50%{transform:translateX(-50%) scale(1.06);box-shadow:0 0 0 12px rgba(216,60,44,0)} }
+@keyframes mflag { 0%,100%{transform:skewY(0)} 50%{transform:skewY(-9deg)} }
+@keyframes mchev { 0%,100%{opacity:.3;transform:translateX(-50%) translateY(0)} 50%{opacity:1;transform:translateX(-50%) translateY(5px)} }
