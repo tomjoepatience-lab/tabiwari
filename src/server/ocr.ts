@@ -1,17 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-// レシート画像を Claude(vision) に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
+// レシート画像を Gemini（既定）または Claude(vision) に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
 // Tesseract より日本語レシートの精度が高い。APIキーはサーバーのみが持つ。
+//
+// プロバイダ選択: GEMINI_API_KEY があれば Gemini（開発用・無料枠）、無ければ ANTHROPIC_API_KEY で Claude にフォールバック。
 
 // OCR は抽出タスクなので低コストな Haiku で十分（Opus の約1/5）。
 // 精度が足りなければ 'claude-sonnet-4-6'（中間）や 'claude-opus-4-8'（最上位）に上げる。
-const MODEL = 'claude-haiku-4-5';
+const CLAUDE_MODEL = 'claude-haiku-4-5';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
-  }
   if (!client) client = new Anthropic();
   return client;
 }
@@ -32,12 +32,35 @@ const USER_TEXT = [
   '- category は内容から最も近いものを1つ選ぶ。',
 ].join('\n');
 
+let loggedProvider = false;
+function logProviderOnce(provider: 'gemini' | 'claude', model: string) {
+  if (loggedProvider) return;
+  loggedProvider = true;
+  console.log(`[ocr] provider: ${provider} (${model})`);
+}
+
 export async function extractReceipt(dataUrl: string): Promise<OcrResult> {
   const m = dataUrl.match(/^data:image\/[a-zA-Z]+;base64,(.*)$/s);
   const data = m ? m[1] : dataUrl;
 
+  if (process.env.GEMINI_API_KEY) {
+    logProviderOnce('gemini', GEMINI_MODEL);
+    const text = await callGemini(data);
+    return normalize(parseJson(text));
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    logProviderOnce('claude', CLAUDE_MODEL);
+    const text = await callClaude(data);
+    return normalize(parseJson(text));
+  }
+
+  throw new Error('GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
+}
+
+async function callClaude(data: string): Promise<string> {
   const res = await getClient().messages.create({
-    model: MODEL,
+    model: CLAUDE_MODEL,
     max_tokens: 4096,
     system: SYSTEM,
     messages: [
@@ -52,8 +75,44 @@ export async function extractReceipt(dataUrl: string): Promise<OcrResult> {
   });
 
   const textBlock = res.content.find((b) => b.type === 'text');
-  const text = textBlock && 'text' in textBlock ? textBlock.text : '';
-  return normalize(parseJson(text));
+  return textBlock && 'text' in textBlock ? textBlock.text : '';
+}
+
+async function callGemini(data: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY as string;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const body = {
+    contents: [
+      {
+        parts: [
+          { inline_data: { mime_type: 'image/jpeg', data } },
+          { text: USER_TEXT },
+        ],
+      },
+    ],
+    systemInstruction: { parts: [{ text: SYSTEM }] },
+    generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4096 },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  const json: any = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error('Gemini の無料枠の上限に達しました。少し待ってからもう一度試してください');
+    }
+    const detail = json?.error?.message ? `: ${json.error.message}` : '';
+    throw new Error(`Gemini APIエラー (${res.status})${detail}`);
+  }
+
+  const parts = json?.candidates?.[0]?.content?.parts ?? [];
+  return parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('');
 }
 
 function parseJson(text: string): unknown {

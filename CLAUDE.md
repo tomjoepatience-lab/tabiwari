@@ -13,7 +13,7 @@
 - UIは 402×840 のスマホ画面キャンバス（`src/client/phone.ts`）。ホームは絶対配置＋scale、それ以外のタブは fillHeight（キャンバス高さを画面にフィット・内側 .pc-scroll だけスクロール）。注意: .pc-scroll と canvas の間に固定高さの div を挟むと、それが包含ブロックになりスクロールが壊れる。
 リニューアル構想の詳細は docs/キャラ家計簿リニューアル.md を参照（決済連携CSV・地図ルート再生はフェーズ2）。
 
-旧来（TabiWari）から温存: レシート明細単位の割り勘＋精算、レシートOCR（Claude vision）、
+旧来（TabiWari）から温存: レシート明細単位の割り勘＋精算、レシートOCR（Gemini / Claude vision フォールバック）、
 思い出写真＋スクラップブック風アルバム、地図ピン、認証（cookieセッション）＋家族グループ。
 慶應「実践のための Web プログラミング」課題として制作、現在は個人利用のクオリティ優先で開発。
 - デモログイン: `demo` / `demo1234`（seed 投入時）。
@@ -34,7 +34,8 @@
 
 ## 環境変数（.env）
 - `DATABASE_URL` … PostgreSQL 接続URL（Neon など）
-- `ANTHROPIC_API_KEY` … レシートOCR（Claude vision）用。https://console.anthropic.com で取得
+- `GEMINI_API_KEY` … レシートOCR用。https://aistudio.google.com/apikey で取得（無料枠）
+- `ANTHROPIC_API_KEY` … レシートOCRのフォールバック用（GEMINI_API_KEY 未設定時）。https://console.anthropic.com で取得
 - `PORT` … 既定 3000
 
 ## DB セットアップ（ローカル）
