@@ -6,7 +6,7 @@ import { phoneCanvas, esc } from './phone';
 import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { canvasModal } from './records';
-import { journeyTotal, journeyGoal, currentStage, journeyPercent, STAGES, openJourney } from './journey';
+import { featuredGoal, currentStage, journeyPercent, STAGES, openJourney } from './journey';
 import { manekoHtml, stageAccessoriesHtml } from './maneko';
 import { STAGE_INFO, stageSceneryHtml, stageBuyIconHtml } from './stage';
 
@@ -23,10 +23,13 @@ export interface KidsHomeArgs {
   onCreateGoal(body: { name: string; emoji: string; target: number; deadline?: string }): void; // 掲示板から
 }
 
-// マネコのおしゃべりタイマー（renderHome が画面を作り直すたびに止める）
+// マネコのおしゃべりタイマー（renderHome が画面を作り直すたびに止める）。
+// kidsTimer=発話サイクル（初回timeout→11秒interval）、kidsHideTimer=表示5秒後の消灯。
 let kidsTimer: number | undefined;
+let kidsHideTimer: number | undefined;
 export function stopKidsSpeech() {
   if (kidsTimer) { clearInterval(kidsTimer); kidsTimer = undefined; }
+  if (kidsHideTimer) { clearTimeout(kidsHideTimer); kidsHideTimer = undefined; }
 }
 
 // XPからレベル進捗（次のレベルまでの割合 0..1）
@@ -107,15 +110,17 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   const hearts = kidsMood(a.insight, o);
   const heartsStr = '♥'.repeat(hearts) + '♡'.repeat(4 - hearts);
   const lvPct = Math.round(levelProgress(s.xp, s.level) * 100);
-  const goal = o.goals.find((g) => !g.done);
-  const goalPct = goal ? Math.min(100, Math.round((goal.saved / goal.target) * 100)) : 0;
-
-  // RPGの旅: 貯金の累計で決まる現在ステージ（衣装＆景色＆進捗％の元。5段階 0..4）
-  const jGoal = journeyGoal(o);
-  const jTotal = journeyTotal(o);
-  const jStage = currentStage(jTotal, jGoal);
-  const jPct = journeyPercent(jTotal, jGoal);
+  // RPGの旅: 「代表目標」（最初の未達成（作成順） ?? 最後の達成済み）単体の進捗でステージが決まる。
+  // 目標を追加しても代表目標は変わらないので、ホームのステージ・%が意味なく変動しない。
+  const fg = featuredGoal(o);
+  const jStage = fg ? currentStage(fg.saved, fg.target) : 0;
+  const jPct = fg ? journeyPercent(fg.saved, fg.target) : 0;
   const d = STAGE_INFO[jStage];
+
+  // 目標カードも代表目標に揃える（o.goals は id DESC＝新しい順なので find だと
+  // 追加したばかりの目標が出てしまい、ステージ表示と食い違う）。
+  const goal = fg && !fg.done ? fg : undefined;
+  const goalPct = goal ? Math.min(100, Math.round((goal.saved / goal.target) * 100)) : 0;
 
   // ステージ別の装備（首輪・帽子・王冠など）。300×370 のキャラ座標系でマネコに重ねる。
   const acc = stageAccessoriesHtml(jStage);
@@ -283,10 +288,13 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   // マネコのおしゃべり（吹き出し）。自分から順ぐりに話す＋タップでもひとこと
   const bubble = canvas.querySelector<HTMLElement>('#k-bubble');
   const bubbleText = canvas.querySelector<HTMLElement>('#k-bubble-text');
+  // 表示5秒 → 消灯6秒のサイクル（常時表示だと建物・景色が見えづらいため）。
   const say = (t: string) => {
     if (!bubble || !bubbleText) return;
     bubbleText.textContent = t;
     bubble.style.opacity = '1';
+    if (kidsHideTimer) clearTimeout(kidsHideTimer);
+    kidsHideTimer = window.setTimeout(() => { bubble.style.opacity = '0'; kidsHideTimer = undefined; }, 5000);
   };
   const TAP_LINES = ['にゃっ!?', 'きょうも きろく してくれて ありがとにゃ！', 'ちょきん がんばろうね！', 'いっしょに お金じょうずに なろうにゃ'];
   let bi = 0;
@@ -296,11 +304,15 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     bi++;
   };
   stopKidsSpeech();
-  window.setTimeout(speakNext, a.celebrate ? 6000 : 900);
-  kidsTimer = window.setInterval(() => {
-    if (!bubble || !bubble.isConnected) { stopKidsSpeech(); return; }
+  // 初回発話（お祝い中は6秒待つ）→ 以降11秒周期（5秒表示＋6秒消灯）。
+  // ブラウザのタイマーIDは timeout/interval で共有なので kidsTimer 1本でOK。
+  kidsTimer = window.setTimeout(() => {
     speakNext();
-  }, 8000);
+    kidsTimer = window.setInterval(() => {
+      if (!bubble || !bubble.isConnected) { stopKidsSpeech(); return; }
+      speakNext();
+    }, 11000);
+  }, a.celebrate ? 6000 : 900);
   canvas.querySelector('#k-cat')?.addEventListener('click', () => {
     jump();
     say(TAP_LINES[Math.floor(Math.random() * TAP_LINES.length)]);
@@ -322,8 +334,8 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   canvas.querySelector('#k-challenge')?.addEventListener('click', () => { if (!o.challengeDone) a.goTab('add'); });
   canvas.querySelector('#k-goal')?.addEventListener('click', () => a.goTab('savings'));
 
-  // せかいをみる → RPGの旅マップ（フルスクリーン）
-  canvas.querySelector('#k-journey')?.addEventListener('click', () => openJourney(o));
+  // せかいをみる → RPGの旅マップ（フルスクリーン・代表目標を初期選択）
+  canvas.querySelector('#k-journey')?.addEventListener('click', () => openJourney(o, fg?.id));
 
   // 掲示板 → もくひょうづくりのカード
   const openGoalModal = (note?: string) => {

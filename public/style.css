@@ -1194,6 +1194,28 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   border-radius: 999px; padding: 7px 15px; box-shadow: 0 4px 12px rgba(180,50,40,.35);
 }
 
+/* 目標切替ピル（.jr-top の直下・fixed）。◀▶で目標を循環切替 */
+.jr-goal-bar {
+  position: fixed; left: 0; right: 0;
+  top: calc(88px + env(safe-area-inset-top));
+  display: flex; justify-content: center;
+  z-index: 4100; pointer-events: none;
+}
+.jr-goal-pill {
+  pointer-events: auto;
+  display: flex; align-items: center;
+  background: #FFFDF6; border: 2.5px solid #E8B62B; border-radius: 999px;
+  padding: 0 8px;
+  box-shadow: 0 4px 12px rgba(150,100,20,.25);
+  font-size: 13px; font-weight: 800; color: #7A5A20;
+}
+.jr-goal-pill .jr-goal-label { white-space: nowrap; padding: 10px 6px; }
+.jr-goal-pill button {
+  border: none; background: none; cursor: pointer; padding: 0;
+  min-width: 44px; min-height: 44px;              /* タップ領域44px確保 */
+  font-family: inherit; font-size: 13px; font-weight: 800; color: #C89A2E;
+}
+
 /* 下部の現在地バナー — v2（白フェードは内側の inline が担当。ここは固定枠だけ） */
 .jr-foot {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 4100;

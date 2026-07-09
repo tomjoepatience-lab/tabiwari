@@ -1,15 +1,14 @@
 // マネコのぼうけん — RPGふうの「たびマップ」。デザイン v2（マネコマップ.dc.html）の忠実移植。
-// ちょきんの累計(journeyTotal = すべての目標の saved 合計)が進むほど、
+// **目標1つ = 1つの旅**。選んだ目標の saved/target が進むほど、
 // 「びんぼう長屋 → かけだしの町 → にぎわい商店街 → 大都会タワマン → 黄金の都」へと
 // 街とマネコの装備が豪華になる。下から上へ進行（下=スタート、上=ゴール）。
-// ホームとは別画面（フルスクリーンの縦スクロール）で、地図ボタンから入る。
-import { Overview } from './api';
+// 上部の切替ピルで目標を行き来できる。ホームとは別画面（フルスクリーンの縦スクロール）。
+import { Overview, SavingsGoal } from './api';
 import { el, yen } from './ui';
 import { esc } from './phone';
 import { manekoHtml, stageAccessoriesHtml } from './maneko';
 
 // ---- 旅の進捗モデル ------------------------------------------------------
-// ゴール金額は「目標に入れている金額（全目標の target 合計）」で決まる。
 // 目標がまだ無いときのフォールバック（0除算回避＆マップが成立する最小値）。
 const GOAL_FALLBACK = 10000;
 
@@ -23,18 +22,22 @@ export const STAGES: Stage[] = [
   { ratio: 1,    key: 'gold',  name: '黄金の都',       sub: 'だいふごうネコ！' },
 ];
 
-// ゴール金額 = 目標に入れている金額の合計（＝すべての もくひょうを かなえる ために ためる額）。
-export function journeyGoal(o: Overview): number {
-  const sum = o.goals.reduce((s, g) => s + Math.max(0, g.target), 0);
-  return sum > 0 ? sum : GOAL_FALLBACK;
+// 切替の並び順: 未達成（作成順）→ 達成済み（作成順）。
+// ※API は id DESC（新しい順）で返すため、そのままだと目標を追加した瞬間に
+//   先頭（＝代表目標）が入れ替わってしまう。作成順(id ASC)に揃えて安定させる。
+function goalOrder(o: Overview): SavingsGoal[] {
+  const byId = [...o.goals].sort((a, b) => a.id - b.id);
+  return [...byId.filter((g) => !g.done), ...byId.filter((g) => g.done)];
+}
+// 代表目標: 最初の未達成目標（作成順） ?? 最後の達成済み目標（100%お祝い表示用） ?? null。
+// 目標を追加しても代表目標は変わらない＝「新しい目標で進捗がリセット/変動して見える」問題を防ぐ。
+export function featuredGoal(o: Overview): SavingsGoal | null {
+  const ordered = goalOrder(o);
+  return ordered.find((g) => !g.done) ?? ordered[ordered.length - 1] ?? null;
 }
 // ステージ i の到達に必要な金額（ゴール金額 × ステージの割合）
 export function stageAt(i: number, goal: number): number {
   return Math.round(STAGES[i].ratio * goal);
-}
-// いまの累計ちょきん（達成ずみ目標もふくむ）
-export function journeyTotal(o: Overview): number {
-  return o.goals.reduce((s, g) => s + Math.max(0, g.saved), 0);
 }
 // 現在のステージ番号（0..4）
 export function currentStage(total: number, goal: number): number {
@@ -433,28 +436,78 @@ function catHtml(stage: number): string {
 }
 
 // ---- 旅マップ本体 --------------------------------------------------------
-export function journeyView(o: Overview): HTMLElement {
-  const goal = journeyGoal(o);
-  const total = journeyTotal(o);
-  const stage = currentStage(total, goal);
-  const pct = journeyPercent(total, goal);
-  const reachedGoal = total >= goal;
-  const nextIdx = Math.min(STAGES.length - 1, stage + 1);
-  const next = STAGES[nextIdx];
-  const toNext = Math.max(0, stageAt(nextIdx, goal) - total);
-
-  // ノード＆カードの状態
-  let nodes = '';
-  let cards = '';
-  for (let i = 0; i < STAGES.length; i++) {
-    const state: 'done' | 'current' | 'locked' =
-      i === stage ? 'current' : total >= stageAt(i, goal) ? 'done' : 'locked';
-    nodes += nodeHtml(i, state, pct);
-    cards += cardHtml(i, goal, state);
-  }
+// goalId 指定でその目標の旅を表示。省略時は代表目標（featuredGoal）。
+// 目標ゼロなら fallback ¥10,000・0% の世界（切替UIなし）。
+export function journeyView(o: Overview, goalId?: number): HTMLElement {
+  const goals = goalOrder(o);              // 切替順: 未達成（作成順）→ 達成済み
+  let sel: SavingsGoal | null =
+    (goalId != null ? goals.find((g) => g.id === goalId) : undefined) ?? featuredGoal(o);
 
   const overlay = el('div', { class: 'jr-overlay' });
-  overlay.innerHTML = `
+
+  // スクロール永続化（overlay 自体は innerHTML を差し替えても同一要素なのでリスナーは1回でよい）
+  const KEY = 'maneko_map_scroll';
+  const onScroll = () => { try { localStorage.setItem(KEY, String(overlay.scrollTop)); } catch { /* noop */ } };
+  overlay.addEventListener('scroll', onScroll, { passive: true });
+
+  // 閉じる。ブラウザ/端末の「戻る」でも閉じられるよう history と連動させる。
+  // history push は**初回のみ**（目標切替では積まない＝戻る1回で必ず閉じる）。
+  let closed = false;
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    window.removeEventListener('popstate', onPop);
+    overlay.removeEventListener('scroll', onScroll);
+    overlay.classList.remove('jr-in');
+    overlay.classList.add('jr-out');
+    window.setTimeout(() => overlay.remove(), 340); // トランジション(.32s)ぶん待って除去
+  };
+  const onPop = () => finish();
+  history.pushState({ jr: 1 }, '');
+  window.addEventListener('popstate', onPop);
+
+  // 目標切替（◀▶で循環）
+  const step = (d: number) => {
+    if (!sel || goals.length < 2) return;
+    const i = goals.findIndex((g) => g.id === sel!.id);
+    sel = goals[(i + d + goals.length) % goals.length];
+    render(false);
+  };
+
+  // 選択目標でオーバーレイの中身を（再）構築する。
+  // preferSavedScroll: 初回のみ true（保存スクロールを復元）。切替時は現在地センター優先。
+  const render = (preferSavedScroll: boolean) => {
+    const goalAmt = sel && sel.target > 0 ? sel.target : GOAL_FALLBACK;
+    const total = sel ? Math.max(0, sel.saved) : 0;
+    const stage = currentStage(total, goalAmt);
+    const pct = journeyPercent(total, goalAmt);
+    const reachedGoal = total >= goalAmt;
+    const nextIdx = Math.min(STAGES.length - 1, stage + 1);
+    const next = STAGES[nextIdx];
+    const toNext = Math.max(0, stageAt(nextIdx, goalAmt) - total);
+
+    // ノード＆カードの状態
+    let nodes = '';
+    let cards = '';
+    for (let i = 0; i < STAGES.length; i++) {
+      const state: 'done' | 'current' | 'locked' =
+        i === stage ? 'current' : total >= stageAt(i, goalAmt) ? 'done' : 'locked';
+      nodes += nodeHtml(i, state, pct);
+      cards += cardHtml(i, goalAmt, state);
+    }
+
+    // 目標切替ピル（目標があるときだけ表示。◀▶は目標が2つ以上のとき）
+    const arrows = goals.length >= 2;
+    const pill = sel ? `
+    <div class="jr-goal-bar">
+      <div class="jr-goal-pill">
+        ${arrows ? '<button class="jr-goal-prev" type="button" aria-label="まえの目標">◀</button>' : ''}
+        <span class="jr-goal-label">${esc(sel.emoji ?? '⭐')} ${esc(sel.name.slice(0, 6))} ・ ${yen(sel.target)}</span>
+        ${arrows ? '<button class="jr-goal-next" type="button" aria-label="つぎの目標">▶</button>' : ''}
+      </div>
+    </div>` : '';
+
+    overlay.innerHTML = `
     <div class="jr-content" style="position:relative;width:100%;height:2680px">
       ${bandsHtml()}
       <div style="position:absolute;left:50%;top:0;width:402px;height:2680px;transform:translateX(-50%)">
@@ -470,6 +523,7 @@ export function journeyView(o: Overview): HTMLElement {
       <div class="jr-title"><span>🗺️</span> マネコの ぼうけん</div>
       <div class="jr-hud">${pct}%</div>
     </div>
+    ${pill}
     <!-- 下部HUD（fixed） -->
     <div class="jr-foot">
       <div style="position:absolute;left:50%;bottom:82px;transform:translateX(-50%);animation:mchev 1.6s ease-in-out infinite;color:#FFFDF6;font-size:20px;text-shadow:0 2px 6px rgba(40,60,90,.4);z-index:1">︿</div>
@@ -480,44 +534,33 @@ export function journeyView(o: Overview): HTMLElement {
       </div>
     </div>`;
 
-  // スクロール位置: 保存があれば復元、なければ現在地センター
-  const KEY = 'maneko_map_scroll';
-  const catTop = CAT_TOP[stage];
-  const onScroll = () => { try { localStorage.setItem(KEY, String(overlay.scrollTop)); } catch { /* noop */ } };
-  overlay.addEventListener('scroll', onScroll, { passive: true });
-  requestAnimationFrame(() => {
-    overlay.classList.add('jr-in');
-    let saved: number | null = null;
-    try { const v = localStorage.getItem(KEY); if (v != null) saved = parseFloat(v); } catch { /* noop */ }
-    const center = Math.max(0, catTop - Math.round(window.innerHeight / 2) + 120);
-    overlay.scrollTo({ top: saved != null && isFinite(saved) ? saved : center, behavior: 'auto' });
-  });
+    // innerHTML 差し替えで消えるリスナーを張り直す
+    overlay.querySelector('.jr-back')?.addEventListener('click', () => { if (!closed) history.back(); });  // 連打ガード
+    overlay.querySelector('.jr-goal-prev')?.addEventListener('click', () => step(-1));
+    overlay.querySelector('.jr-goal-next')?.addEventListener('click', () => step(1));
 
-  // 閉じる。ブラウザ/端末の「戻る」でも閉じられるよう history と連動させる。
-  let closed = false;
-  const finish = () => {
-    if (closed) return;
-    closed = true;
-    window.removeEventListener('popstate', onPop);
-    overlay.removeEventListener('scroll', onScroll);
-    overlay.classList.remove('jr-in');
-    overlay.classList.add('jr-out');
-    window.setTimeout(() => overlay.remove(), 340); // トランジション(.32s)ぶん待って除去
+    // スクロール位置: 初回は保存があれば復元、なければ（＆切替時は常に）現在地センター
+    let top = Math.max(0, CAT_TOP[stage] - Math.round(window.innerHeight / 2) + 120);
+    if (preferSavedScroll) {
+      try {
+        const v = localStorage.getItem(KEY);
+        if (v != null && isFinite(parseFloat(v))) top = parseFloat(v);
+      } catch { /* noop */ }
+    }
+    // 初回は body 追加前に呼ばれるため、追加後（次フレーム）にスクロールする
+    requestAnimationFrame(() => overlay.scrollTo({ top, behavior: 'auto' }));
   };
-  const onPop = () => finish();
-  history.pushState({ jr: 1 }, '');
-  window.addEventListener('popstate', onPop);
-  // 連打ガード: 閉じ処理中は history.back() を呼ばない
-  overlay.querySelector('.jr-back')?.addEventListener('click', () => { if (!closed) history.back(); });
 
+  render(true);
+  requestAnimationFrame(() => overlay.classList.add('jr-in'));
   return overlay;
 }
 
 // ホーム等から呼ぶ: 旅マップを開く（body に載せてフルスクリーン表示）。
-// 既に開いていれば二重に開かない。
-export function openJourney(o: Overview): void {
+// goalId 指定でその目標を選択、省略時は代表目標。既に開いていれば二重に開かない。
+export function openJourney(o: Overview, goalId?: number): void {
   if (document.querySelector('.jr-overlay')) return;
-  document.body.appendChild(journeyView(o));
+  document.body.appendChild(journeyView(o, goalId));
 }
 
 // 取り残し防止: 画面遷移（router）から呼び、開いていれば旅マップを閉じる。
