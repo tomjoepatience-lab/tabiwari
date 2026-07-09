@@ -9,6 +9,31 @@ export function esc(s: string): string {
 export const CANVAS_W = 402;
 export const CANVAS_H = 840;
 
+// ソフトキーボードの高さを CSS 変数 --kb として公開する。
+// iOS standalone PWA ではキーボード表示で window.innerHeight が縮まないため、
+// fillHeight キャンバス（=画面高さ）の下端＝記録ボタンがキーボードの裏に隠れ、
+// 既に最下部までスクロール済みだと前に出せなくなる（品数が多いほど顕著）。
+// visualViewport の縮みぶんを --kb に入れ、.pc-scroll の下パディングに足すことで
+// 保存ボタンをキーボードより上へスクロールできるようにする。
+// デスクトップやキーボード非表示時は visualViewport==innerHeight なので --kb=0px（挙動不変）。
+let kbInstalled = false;
+export function installKeyboardInset(): void {
+  if (kbInstalled || typeof window === 'undefined') return;
+  const vv = window.visualViewport;
+  if (!vv) return;
+  kbInstalled = true;
+  const root = document.documentElement;
+  const update = () => {
+    const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    // アドレスバー等の小さなブレは無視し、キーボード相当（120px超）だけ反映する。
+    root.style.setProperty('--kb', inset > 120 ? `${Math.round(inset)}px` : '0px');
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  update();
+}
+installKeyboardInset();
+
 // 402×840 のキャンバスを生成して返す。html を innerHTML で流し込む。
 // fillHeight=true: キャンバス高さを画面高さに合わせ、内側の .pc-scroll だけでスクロールさせる
 //   （固定840px＋body二重スクロールで下端が画面外に出る不具合を防ぐ）。ホームは絶対配置(840px前提)
