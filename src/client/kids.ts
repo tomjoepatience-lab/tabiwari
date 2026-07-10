@@ -482,13 +482,13 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
       if (coins < PRICE) {
         priceEl.innerHTML = `
           <div class="gc-cost">1かい ${PRICE}コイン（いま ${coins} コイン）</div>
-          <button class="gc-open" type="button" disabled>ひらける！</button>
-          <div class="gc-need">あと ${PRICE - coins} コインで ひらけるよ</div>`;
+          <button class="gc-open" type="button" disabled>あける！</button>
+          <div class="gc-need">あと ${PRICE - coins} コインで あけられるよ</div>`;
         return;
       }
       priceEl.innerHTML = `
         <div class="gc-cost">1かい ${PRICE}コイン（いま ${coins} コイン）</div>
-        <button class="gc-open" type="button">ひらける！</button>`;
+        <button class="gc-open" type="button">あける！</button>`;
       priceEl.querySelector('.gc-open')?.addEventListener('click', doOpen);
     }
 

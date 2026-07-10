@@ -959,6 +959,11 @@ body.theme-kids main, body.theme-adult main {
   min-height: 100dvh;
   justify-content: flex-start;
 }
+/* こどもホーム（非fillキャンバス＝cover スケール・スマホ幅のみ）: キャンバスがビューポート全体を
+   覆うゲーム画面なので safe-area 余白も外す（HUD は top:60px・ナビは bottom:26px でノッチ/ホームバーを回避）。 */
+@media (max-width: 500px) {
+  body.theme-kids main:has(> .pc-wrap > .pc-canvas:not(.fill)) { padding: 0; }
+}
 .pc-scroll {
   position: absolute; inset: 0;
   overflow-y: auto;

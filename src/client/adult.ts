@@ -188,7 +188,7 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
       </div>
       ${goalCards.length > 1 ? `<div class="ag-dots">${goalCards.map((_, i) => `<span class="ag-dot${i === 0 ? ' on' : ''}" data-dot="${i}"></span>`).join('')}</div>` : ''}
     </div>` : '';
-  // 目標カードがある分だけ下のセクションを詰める（つかいみち3件・最近2件）
+  // 目標カードがある分だけ下のセクションを詰める（つかいみちは3件に）
   const catsTop = hasGoals ? 452 : 356;
   const recentTop = hasGoals ? 608 : 546;
 
@@ -217,8 +217,8 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
     if (d === yIso) return 'きのう';
     return `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   };
-  // 目標カードがあるときは下に詰まるので2件、ないときは3件（下部ナビと重ねない）
-  const rows = a.recent.slice(0, hasGoals ? 2 : 3);
+  // ホームはスクロール式（fillHeight）になったので最大10件まで表示（実機FB: 2〜3件しか見えなかった）
+  const rows = a.recent.slice(0, 10);
   // アイコンは支配的なジャンル（金額最大）で決め、つかいみちバーの順位色と対応させる
   const domGenre = (r: RecentReceipt) => {
     const m = new Map<string, number>();
@@ -245,8 +245,17 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
     </div>`;
   }).join('');
 
+  // スクロール式ホーム: コンテンツ高さを「最近の記録」の件数から動的計算する。
+  // recentTop + セクション見出し(~30px) + 行高さ53px×件数 + カード下パディング24px + 下部余白170px（ナビ84px＋ゆとり）
+  const contentH = recentTop + 30 + Math.max(1, rows.length) * 53 + 24 + 170;
+
+  // 実機FB対応: 840px 固定キャンバス（transform scale・スクロール不可）をやめ、
+  // fill タブと同じ「fillHeight ＋ .pc-scroll 内側スクロール」方式にする。
+  // 既存の絶対配置セクションは position:relative の内側コンテンツ div にそのまま置き、
+  // 下部ナビだけスクロールの外（canvas 直下・bottom固定 z-20）へ出して画面下に常時固定する。
   const html = `
-  <div style="position:relative;width:402px;height:840px;overflow:hidden;background:#F7F4EE;font-family:'M PLUS Rounded 1c', sans-serif;color:#2E2A24">
+  <div class="pc-scroll" style="padding:0;display:block">
+  <div style="position:relative;width:402px;max-width:100%;margin:0 auto;height:${contentH}px;overflow:hidden;font-family:'M PLUS Rounded 1c', sans-serif;color:#2E2A24">
 
     <!-- ヘッダー -->
     <div style="position:absolute;left:20px;right:20px;top:64px;display:flex;align-items:center;justify-content:space-between">
@@ -302,10 +311,11 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
       </div>
     </div>
 
-    ${adultNavHtml('home')}
-  </div>`;
+  </div>
+  </div>
+  ${adultNavHtml('home')}`;
 
-  const { wrap, canvas } = phoneCanvas(html, { bg: '#F7F4EE' });
+  const { wrap, canvas } = phoneCanvas(html, { bg: '#F7F4EE', fillHeight: true });
   canvas.querySelectorAll<HTMLElement>('[data-nav]').forEach((n) => {
     n.addEventListener('click', () => a.goTab(n.dataset.nav as KidsTab));
   });

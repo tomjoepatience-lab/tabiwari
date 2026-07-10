@@ -52,28 +52,72 @@ export function phoneCanvas(
       // fillHeight: transform を使わず幅いっぱい（最大 CANVAS_W）＋高さ画面フィット。
       // transform された要素は position:absolute の子(.pc-scroll)の包含ブロックにならず
       // 内側スクロールが壊れるため、ここでは scale せず等倍で画面に合わせる。
-      // 高さは visualViewport ではなく layout viewport(innerHeight) を使う:
+      // 高さは visualViewport ではなく layout viewport を使う:
       //   ソフトキーボード表示で visualViewport が縮むとキャンバスが跳ねるため。
       //   下限クランプもしない（横向き等 vh<キャンバスで body 二重スクロールに戻るのを防ぐ）。
-      const h = Math.round(window.innerHeight - 8);
+      // 実機FB対応: innerHeight−8 固定だと、iPhone では main の padding
+      // （env(safe-area-inset-top/bottom)≒59+34px）のぶんキャンバスが画面下へはみ出し、
+      // ナビと保存ボタンが折り返しの下に沈んで「保存ボタンがナビに重なり上に出せない」状態に
+      // なっていた。safe-area を差し引いた 100dvh ベースの calc にする（env()=0 の環境では
+      // 従来の innerHeight−8 と同値）。px 指定はcalc/dvh未対応環境向けフォールバック。
       canvas.style.transform = 'none';
-      canvas.style.height = `${h}px`;
-      wrap.style.height = `${h}px`;
+      const px = `${Math.round(window.innerHeight - 8)}px`;
+      const h = 'calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 8px)';
+      canvas.style.height = px;
+      canvas.style.height = h;
+      wrap.style.height = px;
+      wrap.style.height = h;
       // .pc-scroll は canvas 直下（inset:0）なので canvas 高さに自動で追従する。
     } else {
-      // ホーム（絶対配置 402×840）は幅と高さの両方に収まるよう等倍縮小。
-      // 高さも見ることで「上下が見切れて body スクロールになる」のを防ぎ、ゲーム画面のように全体が見える。
-      // ただし入力フォーカス中（＝ソフトキーボードで innerHeight が縮む瞬間）は高さ再計算をスキップし、
+      // ホーム（絶対配置 402×840・現在はこどもホームのみが利用）。
+      // 入力フォーカス中（＝ソフトキーボードで innerHeight が縮む瞬間）は再計算をスキップし、
       // ホーム上のモーダル（けいじばん/ぶたさん貯金箱の入力）が極端に小さくなるのを防ぐ。
       // モーダルは .pc-canvas の子なので、canvas を縮めると入力も一緒に縮んでしまうため。
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
       if (typing) return;
-      const availW = Math.min(window.innerWidth, document.documentElement.clientWidth) - 12;
-      const availH = window.innerHeight - 16;
-      const scale = Math.min(1, availW / CANVAS_W, availH / CANVAS_H);
-      canvas.style.transform = `scale(${scale})`;
-      canvas.style.height = `${CANVAS_H}px`;
-      wrap.style.height = `${Math.round(CANVAS_H * scale)}px`;
+      const vw = Math.min(window.innerWidth, document.documentElement.clientWidth);
+      if (vw <= 500) {
+        // 実機FB対応: contain（min スケール）だと縦長実機で上下に外側背景が見え、
+        // ナビが画面下から浮きキャンバスの境目が見えていた。スマホ幅では cover スケール
+        // （max）でビューポート全体を覆う。ただし左右の切れは片側14pxまでにキャップし、
+        // 下端アンカー（wrap を overflow:hidden、canvas を bottom:0）で top 方向にだけ
+        // はみ出させる → 下部ナビが常に画面最下部に着く。キャップで上に小さな残余ギャップが
+        // 出る場合は body の stageBackdrop（先頭 0〜12% を sky 先頭色でフラット化）が埋める。
+        const availW = vw;
+        const availH = window.innerHeight;
+        const scale = Math.min(
+          Math.max(availW / CANVAS_W, availH / CANVAS_H), // cover
+          (availW + 28) / CANVAS_W                        // 左右クロップは 14px×2 まで
+        );
+        canvas.style.height = `${CANVAS_H}px`;
+        canvas.style.position = 'absolute';
+        canvas.style.left = '50%';
+        canvas.style.top = 'auto';
+        canvas.style.bottom = '0';
+        canvas.style.transformOrigin = 'bottom center';
+        canvas.style.transform = `translateX(-50%) scale(${scale})`;
+        wrap.style.position = 'relative';
+        wrap.style.width = '100%';
+        wrap.style.height = `${availH}px`;
+        wrap.style.overflow = 'hidden';
+      } else {
+        // タブレット/PC（幅 > 500px）は従来どおり contain: 幅と高さの両方に収まるよう
+        // 等倍縮小し、ゲーム画面のように全体が見える。cover 用の inline スタイルは戻す。
+        canvas.style.position = '';
+        canvas.style.left = '';
+        canvas.style.top = '';
+        canvas.style.bottom = '';
+        canvas.style.transformOrigin = '';
+        wrap.style.position = '';
+        wrap.style.width = '';
+        wrap.style.overflow = '';
+        const availW = vw - 12;
+        const availH = window.innerHeight - 16;
+        const scale = Math.min(1, availW / CANVAS_W, availH / CANVAS_H);
+        canvas.style.transform = `scale(${scale})`;
+        canvas.style.height = `${CANVAS_H}px`;
+        wrap.style.height = `${Math.round(CANVAS_H * scale)}px`;
+      }
     }
   };
   fit();
