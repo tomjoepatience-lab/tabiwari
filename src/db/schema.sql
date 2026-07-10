@@ -168,6 +168,47 @@ CREATE TABLE IF NOT EXISTS incomes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 親子アカウント連携（親=おとな が 子=こども を見守る。1親:N子・子は親1人まで） ----
+CREATE TABLE IF NOT EXISTS account_links (
+  id SERIAL PRIMARY KEY,
+  parent_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  child_user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (child_user_id)   -- 子は親を1人までしか持てない
+);
+-- 連携コード（親が発行・8桁・10分有効。子が入力して連携成立）
+CREATE TABLE IF NOT EXISTS link_codes (
+  code TEXT PRIMARY KEY,
+  parent_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_links_parent ON account_links (parent_user_id);
+
+-- お手伝いポイント（親が子にメニューを用意→子が申請→親が承認でポイント付与） --------
+-- メニュー/ログは連携(account_links)にぶら下げ、連携解除で CASCADE 消去。
+-- ポイント残高は子の user_settings.chore_points に貯まり、解除後も残る。
+CREATE TABLE IF NOT EXISTS chores (
+  id       SERIAL PRIMARY KEY,
+  link_id  INTEGER NOT NULL REFERENCES account_links(id) ON DELETE CASCADE,
+  name     TEXT NOT NULL,
+  points   INTEGER NOT NULL CHECK (points > 0),
+  active   BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS chore_logs (
+  id        SERIAL PRIMARY KEY,
+  chore_id  INTEGER NOT NULL REFERENCES chores(id) ON DELETE CASCADE,
+  child_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  points    INTEGER NOT NULL,             -- 申請時点のスナップショット
+  status    TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at TIMESTAMPTZ
+);
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS chore_points INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_chores_link ON chores (link_id);
+CREATE INDEX IF NOT EXISTS idx_chore_logs_chore ON chore_logs (chore_id);
+
 CREATE INDEX IF NOT EXISTS idx_goals_user   ON savings_goals (user_id);
 CREATE INDEX IF NOT EXISTS idx_incomes_user ON incomes (user_id);
 

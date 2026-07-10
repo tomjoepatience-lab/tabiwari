@@ -52,6 +52,29 @@ export const STAGE_INFO: StageInfo[] = [
   },
 ];
 
+// STAGE_INFO[s] の sky（空）と ground（地面）を 1 本の 180deg グラデ文字列に合成して返す。
+// html/body の背景に敷き、402 幅キャンバスの外側（スケール余白＝旧レターボックス）を
+// キャンバス内と同系色で埋め、「アプリの外の背景」を露出させないための連続背景。
+// sky の停止点を 0〜54%、ground の停止点を 56〜100% に圧縮再配置し、54〜56% の補間で
+// つなぎ目をぼかす。0% 色は sky の先頭色に一致する（キャンバス端との色差を消す）。
+export function stageBackdrop(s: number): string {
+  const d = STAGE_INFO[Math.max(0, Math.min(4, s))];
+  const parse = (g: string): { color: string; pos: number }[] => {
+    const inner = g.slice(g.indexOf('(') + 1, g.lastIndexOf(')'));
+    const parts = inner.split(',').map((p) => p.trim());
+    parts.shift(); // 先頭の "180deg" を捨てる
+    return parts.map((p) => {
+      const m = p.match(/^(.+?)\s+([\d.]+)%$/)!;
+      return { color: m[1], pos: parseFloat(m[2]) };
+    });
+  };
+  const remap = (stops: { color: string; pos: number }[], lo: number, hi: number): string => {
+    const max = Math.max(...stops.map((x) => x.pos)) || 1;
+    return stops.map((x) => `${x.color} ${(lo + (x.pos / max) * (hi - lo)).toFixed(1)}%`).join(',');
+  };
+  return `linear-gradient(180deg,${remap(parse(d.sky), 0, 54)},${remap(parse(d.ground), 56, 100)})`;
+}
+
 // ステージ別の景色レイヤー一式（太陽・雲・遠景・地面・道・建物・小物）。ManekoStage.dc.html の忠実移植。
 export function stageSceneryHtml(s: number): string {
   const d = STAGE_INFO[Math.max(0, Math.min(4, s))];

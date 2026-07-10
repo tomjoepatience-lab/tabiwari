@@ -44,6 +44,7 @@ export type UserSettings = {
 export type Rarity = 'normal' | 'rare' | 'super';
 export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
 export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean; deadline: string | null };
+export type IncomeSummary = { id: number; amount: number; name: string; on_date: string };
 export type Overview = {
   settings: UserSettings | null;
   month: { spend: number; income: number; byCategory: { category: string; total: number }[] };
@@ -52,6 +53,30 @@ export type Overview = {
   todayRecorded: boolean;
   challengeDone: boolean;
   recordsCount: number;
+  latestIncome: IncomeSummary | null; // 親からのおこづかい着信トースト用
+  linkedAsChild: boolean;             // 子として連携中か（おとな切替ボタン非表示用）
+  chorePoints: number;                // お手伝いポイント残高
+  pendingChoreCount: number;          // 親として承認待ちの申請数（せってい バッジ用）
+};
+// お手伝いポイント
+export type ChoreMenuItem = { id: number; name: string; points: number; pending: boolean };
+export type ChoreHistory = { id: number; name: string; points: number; status: 'pending' | 'approved' | 'rejected'; created_at: string };
+export type MyChores = { points: number; chores: ChoreMenuItem[]; history: ChoreHistory[] };
+export type ChildChoreMenu = { id: number; name: string; points: number; active: boolean };
+export type ChildChorePending = { id: number; chore_name: string; points: number; created_at: string };
+export type ChildChores = { points: number; menu: ChildChoreMenu[]; pending: ChildChorePending[] };
+// 親子アカウント連携
+export type LinkCode = { code: string; expires_at: string };
+export type ChildLink = { id: number; child_user_id: number; username: string; created_at: string };
+export type ParentLink = { id: number; username: string };
+export type Links = { asParent: ChildLink[]; asChild: ParentLink | null };
+export type JoinResult = { id: number; parent: { username: string } };
+export type ChildOverview = {
+  username: string;
+  wallet: number;
+  month: { spend: number; income: number };
+  goals: SavingsGoal[];
+  recent: { store_name: string | null; total: number; purchased_on: string; first_item: string | null }[];
 };
 export type QuickReward = { xp: number; coins: number; level: number; levelUp: boolean; challengeCleared: boolean } | null;
 export type RecentItem = { id: number; name: string; price: number; quantity: number; genre: string | null };
@@ -158,6 +183,26 @@ export const api = {
     fetch('/api/costumes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, on }) }).then((r) => json<{ owned: string[]; equipped: string[] }>(r)),
   addIncome: (body: { name?: string; amount: number; on_date?: string }) =>
     fetch('/api/incomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number; name: string; amount: number; on_date: string }>(r)),
+  // 親子アカウント連携
+  createLinkCode: () => fetch('/api/links/code', { method: 'POST' }).then((r) => json<LinkCode>(r)),
+  joinLink: (code: string) =>
+    fetch('/api/links/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then((r) => json<JoinResult>(r)),
+  getLinks: () => fetch('/api/links').then((r) => json<Links>(r)),
+  deleteLink: (id: number) => fetch(`/api/links/${id}`, { method: 'DELETE' }),
+  childOverview: (childId: number) => fetch(`/api/children/${childId}/overview`).then((r) => json<ChildOverview>(r)),
+  sendAllowance: (childId: number, amount: number, name?: string) =>
+    fetch(`/api/children/${childId}/allowance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, name }) }).then((r) => json<{ id: number; amount: number; name: string }>(r)),
+  // お手伝いポイント
+  addChore: (childId: number, body: { name: string; points: number }) =>
+    fetch(`/api/children/${childId}/chores`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number; name: string; points: number }>(r)),
+  deleteChore: (id: number) => fetch(`/api/chores/${id}`, { method: 'DELETE' }),
+  myChores: () => fetch('/api/chores').then((r) => json<MyChores>(r)),
+  claimChore: (id: number) => fetch(`/api/chores/${id}/claim`, { method: 'POST' }).then((r) => json<{ id: number }>(r)),
+  childChores: (childId: number) => fetch(`/api/children/${childId}/chores`).then((r) => json<ChildChores>(r)),
+  decideChore: (logId: number, approve: boolean) =>
+    fetch(`/api/chore-logs/${logId}/${approve ? 'approve' : 'reject'}`, { method: 'POST' }).then((r) => json<{ status: 'approved' | 'rejected' }>(r)),
+  exchangePoints: (to: 'yen' | 'coin') =>
+    fetch('/api/chores/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) }).then((r) => json<{ yen: number } | { coins: number; restPoints: number }>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,
   config: () => fetch('/api/config').then((r) => json<{ mapsKey: string }>(r)),
   // 思い出写真

@@ -766,6 +766,16 @@ api.get('/overview', async (req, res) => {
     const savedAll = goalsQ.rows.reduce((a, g) => a + g.saved, 0);
     const challengeQ = await pool.query(
       `SELECT (last_challenge_date = CURRENT_DATE) AS done FROM user_settings WHERE user_id = $1`, [userId]);
+    // 親からのおこづかい着信トースト用に最新の収入1件＋子として連携中か
+    const latestIncomeQ = await pool.query(
+      `SELECT id, amount, name, on_date FROM incomes WHERE user_id = $1 ORDER BY on_date DESC, id DESC LIMIT 1`, [userId]);
+    const linkedAsChild = await isLinkedChild(userId);
+    // お手伝いポイント: 自分の残高＋（親として）承認待ちの申請数（せってい バッジ用）
+    const pendingChoreQ = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM chore_logs cl
+         JOIN chores c ON c.id = cl.chore_id
+         JOIN account_links al ON al.id = c.link_id
+        WHERE al.parent_user_id = $1 AND cl.status = 'pending'`, [userId]);
 
     const wallet = (s?.balance_start ?? 0) + incomeQ.rows[0].total - allSpendQ.rows[0].total - savedAll;
     res.json({
@@ -776,6 +786,10 @@ api.get('/overview', async (req, res) => {
       todayRecorded: todayQ.rows.length > 0,
       challengeDone: challengeQ.rows[0]?.done === true,
       recordsCount: countQ.rows[0].n,
+      latestIncome: latestIncomeQ.rows[0] ?? null,
+      linkedAsChild,
+      chorePoints: s?.chore_points ?? 0,
+      pendingChoreCount: pendingChoreQ.rows[0].n,
     });
   } catch (e) {
     serverError(res, e);
@@ -791,6 +805,10 @@ api.put('/settings', async (req, res) => {
   }
   const num = (v: unknown) => (v === null ? null : Number.isFinite(Number(v)) ? Math.round(Number(v)) : undefined);
   try {
+    // 連携中の子は おとなモードへ切り替えできない（見守りを外せてしまうため）
+    if (mode === 'adult' && (await isLinkedChild(userId))) {
+      return res.status(403).json({ error: '連携中は おとなモードに きりかえできないよ' });
+    }
     const cur = (await pool.query(`SELECT * FROM user_settings WHERE user_id = $1`, [userId])).rows[0] ?? {};
     const next = {
       mode: mode ?? cur.mode ?? 'adult',
@@ -1083,6 +1101,413 @@ api.post('/expenses/quick', async (req, res) => {
 
     await client.query('COMMIT');
     res.status(201).json({ receipt_id: r.rows[0].id, trip_id: trip.id, reward });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    serverError(res, e);
+  } finally {
+    client.release();
+  }
+});
+
+// ---- 親子アカウント連携（親=おとな が 子=こども を見守る） -------------------
+// 連携コードの英数字（紛らわしい I/O/0/1 を除外）。crypto.randomInt で偏りなく生成。
+const LINK_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LINK_CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
+function genLinkCode(): string {
+  let out = '';
+  for (let i = 0; i < 8; i++) out += LINK_ALPHABET[crypto.randomInt(LINK_ALPHABET.length)];
+  return out;
+}
+
+// このユーザーは誰かの子として連携中か（true=おとなモード切替禁止 等）
+async function isLinkedChild(userId: number): Promise<boolean> {
+  const { rows } = await pool.query(`SELECT 1 FROM account_links WHERE child_user_id = $1`, [userId]);
+  return rows.length > 0;
+}
+// parentId が childId の親として連携しているか（子データ閲覧・送金の権限チェック）
+async function isParentOf(parentId: number, childId: number): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM account_links WHERE parent_user_id = $1 AND child_user_id = $2`, [parentId, childId]);
+  return rows.length > 0;
+}
+
+// 連携コード発行（親側）。既存の未使用コードは破棄して1親1コードに保つ。
+api.post('/links/code', async (req, res) => {
+  const userId = uid(req);
+  try {
+    if (await isLinkedChild(userId)) {
+      return res.status(400).json({ error: '連携中のアカウントは 親になれません' });
+    }
+    await pool.query(`DELETE FROM link_codes WHERE parent_user_id = $1 AND used = false`, [userId]);
+    // PK 衝突は極めて稀だが、数回だけ引き直す
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = genLinkCode();
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO link_codes (code, parent_user_id, expires_at)
+           VALUES ($1, $2, now() + interval '10 minutes') RETURNING code, expires_at`,
+          [code, userId]);
+        return res.json({ code: rows[0].code, expires_at: rows[0].expires_at });
+      } catch (e: any) {
+        if (e?.code !== '23505') throw e; // コード重複以外は本物のエラー
+      }
+    }
+    return res.status(500).json({ error: 'コードの発行に失敗しました。もう一度お試しください' });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 連携（子側）。コードを入力して親と結ぶ。1ユーザー1分10回の簡易レート制限。
+const joinHits = new Map<number, number[]>();
+api.post('/links/join', async (req, res) => {
+  const userId = uid(req);
+  const now = Date.now();
+  const hits = (joinHits.get(userId) ?? []).filter((t) => now - t < 60_000);
+  if (hits.length >= 10) return res.status(429).json({ error: '回数制限に達しました。少し待ってから試してください' });
+  hits.push(now);
+  joinHits.set(userId, hits);
+
+  const code = typeof (req.body ?? {}).code === 'string' ? (req.body.code as string).trim().toUpperCase() : '';
+  const badCode = { error: 'コードが ちがうか きげんぎれだよ' };
+  if (!LINK_CODE_RE.test(code)) return res.status(400).json(badCode);
+  try {
+    const cQ = await pool.query(
+      `SELECT parent_user_id FROM link_codes WHERE code = $1 AND used = false AND expires_at > now()`, [code]);
+    const codeRow = cQ.rows[0];
+    if (!codeRow) return res.status(400).json(badCode);
+    const parentId = codeRow.parent_user_id as number;
+    if (parentId === userId) return res.status(400).json({ error: 'じぶんのコードは つかえないよ' });
+    if (await isLinkedChild(userId)) return res.status(400).json({ error: 'もう おうちと つながってるよ' });
+    // 親自身が誰かの子として連携中なら親になれない
+    if (await isLinkedChild(parentId)) return res.status(400).json({ error: 'そのコードは いま つかえないよ' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const linkQ = await client.query(
+        `INSERT INTO account_links (parent_user_id, child_user_id) VALUES ($1, $2) RETURNING id`,
+        [parentId, userId]);
+      await client.query(`UPDATE link_codes SET used = true WHERE code = $1`, [code]);
+      const pQ = await client.query(`SELECT username FROM users WHERE id = $1`, [parentId]);
+      await client.query('COMMIT');
+      res.status(201).json({ id: linkQ.rows[0].id, parent: { username: pQ.rows[0]?.username ?? '' } });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      if (e?.code === '23505') return res.status(400).json({ error: 'もう おうちと つながってるよ' });
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 連携の一覧（親としての子ども達＋子としての親）
+api.get('/links', async (req, res) => {
+  const userId = uid(req);
+  try {
+    const asParentQ = await pool.query(
+      `SELECT al.id, al.child_user_id, u.username, al.created_at
+         FROM account_links al JOIN users u ON u.id = al.child_user_id
+        WHERE al.parent_user_id = $1 ORDER BY al.id`, [userId]);
+    const asChildQ = await pool.query(
+      `SELECT al.id, u.username
+         FROM account_links al JOIN users u ON u.id = al.parent_user_id
+        WHERE al.child_user_id = $1`, [userId]);
+    res.json({ asParent: asParentQ.rows, asChild: asChildQ.rows[0] ?? null });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 連携の解除（当事者=親か子のどちらかのみ。他人は 404）
+api.delete('/links/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM account_links WHERE id = $1 AND ($2 IN (parent_user_id, child_user_id))`,
+      [id, uid(req)]);
+    if (!rowCount) return res.status(404).json({ error: 'not found' });
+    res.status(204).end();
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 子の様子（親のみ・読み取り専用）。おさいふ・今月収支・目標・直近の記録。
+api.get('/children/:childId/overview', async (req, res) => {
+  const parentId = uid(req);
+  const childId = Number(req.params.childId);
+  if (!Number.isInteger(childId)) return res.status(400).json({ error: 'invalid id' });
+  try {
+    if (!(await isParentOf(parentId, childId))) return res.status(404).json({ error: 'not found' });
+    const gids = await userGroupIds(childId);
+    const zero = { rows: [{ total: 0 }] };
+
+    const userQ = await pool.query(`SELECT username FROM users WHERE id = $1`, [childId]);
+    const settingsQ = await pool.query(`SELECT balance_start FROM user_settings WHERE user_id = $1`, [childId]);
+    const balanceStart = settingsQ.rows[0]?.balance_start ?? 0;
+
+    const monthSpendQ = gids.length ? await pool.query(
+      `SELECT COALESCE(SUM(i.price), 0)::int AS total
+         FROM receipts r JOIN items i ON i.receipt_id = r.id JOIN trips t ON t.id = r.trip_id
+        WHERE t.group_id = ANY($1::int[])
+          AND date_trunc('month', r.purchased_on) = date_trunc('month', CURRENT_DATE)`, [gids]) : zero;
+    const allSpendQ = gids.length ? await pool.query(
+      `SELECT COALESCE(SUM(i.price), 0)::int AS total
+         FROM receipts r JOIN items i ON i.receipt_id = r.id JOIN trips t ON t.id = r.trip_id
+        WHERE t.group_id = ANY($1::int[])`, [gids]) : zero;
+    const incomeQ = await pool.query(
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE date_trunc('month', on_date) = date_trunc('month', CURRENT_DATE)), 0)::int AS month,
+              COALESCE(SUM(amount), 0)::int AS total
+         FROM incomes WHERE user_id = $1`, [childId]);
+    const goalsQ = await pool.query(
+      `SELECT id, name, emoji, target, saved, done, deadline FROM savings_goals WHERE user_id = $1 ORDER BY done, id DESC`, [childId]);
+    const savedAll = goalsQ.rows.reduce((a, g) => a + g.saved, 0);
+    // 直近10件: 子が所属するグループのレシート。先頭品名と合計だけ。
+    const recentQ = gids.length ? await pool.query(
+      `SELECT r.store_name, COALESCE(SUM(i.price), 0)::int AS total, r.purchased_on,
+              (SELECT i2.name FROM items i2 WHERE i2.receipt_id = r.id ORDER BY i2.id LIMIT 1) AS first_item
+         FROM receipts r
+         JOIN trips t ON t.id = r.trip_id
+         JOIN group_members gm ON gm.group_id = t.group_id AND gm.user_id = $1
+         LEFT JOIN items i ON i.receipt_id = r.id
+        GROUP BY r.id
+        ORDER BY r.purchased_on DESC, r.id DESC
+        LIMIT 10`, [childId]) : { rows: [] };
+
+    const wallet = balanceStart + incomeQ.rows[0].total - allSpendQ.rows[0].total - savedAll;
+    res.json({
+      username: userQ.rows[0]?.username ?? '',
+      wallet,
+      month: { spend: monthSpendQ.rows[0].total, income: incomeQ.rows[0].month },
+      goals: goalsQ.rows,
+      recent: recentQ.rows,
+    });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// おこづかい送金（親のみ）。子の incomes に1件作成する。
+api.post('/children/:childId/allowance', async (req, res) => {
+  const parentId = uid(req);
+  const childId = Number(req.params.childId);
+  if (!Number.isInteger(childId)) return res.status(400).json({ error: 'invalid id' });
+  const { amount, name } = req.body ?? {};
+  const a = Math.round(Number(amount));
+  if (!Number.isInteger(a) || a < 1 || a > 2_000_000_000) {
+    return res.status(400).json({ error: '金額は 1〜20億の整数で入れてね' });
+  }
+  const label = typeof name === 'string' && name.trim() ? name.trim() : 'おこづかい（おうちから）';
+  try {
+    if (!(await isParentOf(parentId, childId))) return res.status(404).json({ error: 'not found' });
+    const { rows } = await pool.query(
+      `INSERT INTO incomes (user_id, name, amount) VALUES ($1, $2, $3) RETURNING id, amount, name`,
+      [childId, label, a]);
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// ---- お手伝いポイント（親がメニュー登録→子が申請→親が承認で加点） -----------------
+// 子の残高（user_settings.chore_points）を安全に読む。設定行が無ければ 0。
+async function childChorePoints(userId: number): Promise<number> {
+  const { rows } = await pool.query(`SELECT chore_points FROM user_settings WHERE user_id = $1`, [userId]);
+  return rows[0]?.chore_points ?? 0;
+}
+
+// メニュー登録（親のみ）。名前1〜20文字・ポイント1〜100000。
+api.post('/children/:childId/chores', async (req, res) => {
+  const parentId = uid(req);
+  const childId = Number(req.params.childId);
+  if (!Number.isInteger(childId)) return res.status(400).json({ error: 'invalid id' });
+  const name = typeof (req.body ?? {}).name === 'string' ? req.body.name.trim() : '';
+  const points = Math.round(Number((req.body ?? {}).points));
+  if (name.length < 1 || name.length > 20) return res.status(400).json({ error: 'なまえは 1〜20文字で いれてね' });
+  if (!Number.isInteger(points) || points < 1 || points > 100000) {
+    return res.status(400).json({ error: 'ポイントは 1〜100000の整数で いれてね' });
+  }
+  try {
+    const linkQ = await pool.query(
+      `SELECT id FROM account_links WHERE parent_user_id = $1 AND child_user_id = $2`, [parentId, childId]);
+    const linkId = linkQ.rows[0]?.id;
+    if (!linkId) return res.status(404).json({ error: 'not found' });
+    const { rows } = await pool.query(
+      `INSERT INTO chores (link_id, name, points) VALUES ($1, $2, $3) RETURNING id, name, points`,
+      [linkId, name, points]);
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// メニュー削除（親のみ・ソフト削除）。pending の申請は残し、承認/却下は引き続き可能。
+api.delete('/chores/:id', async (req, res) => {
+  const parentId = uid(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE chores c SET active = false
+         FROM account_links al
+        WHERE c.id = $1 AND al.id = c.link_id AND al.parent_user_id = $2`,
+      [id, parentId]);
+    if (!rowCount) return res.status(404).json({ error: 'not found' });
+    res.status(204).end();
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 子側: 選べるメニュー＋自分の申請状況＋残高。連携なしでも残高は見える。
+api.get('/chores', async (req, res) => {
+  const userId = uid(req);
+  try {
+    const points = await childChorePoints(userId);
+    const choresQ = await pool.query(
+      `SELECT c.id, c.name, c.points,
+              EXISTS (SELECT 1 FROM chore_logs cl
+                       WHERE cl.chore_id = c.id AND cl.child_user_id = $1 AND cl.status = 'pending') AS pending
+         FROM chores c JOIN account_links al ON al.id = c.link_id
+        WHERE al.child_user_id = $1 AND c.active
+        ORDER BY c.id`, [userId]);
+    const histQ = await pool.query(
+      `SELECT cl.id, c.name, cl.points, cl.status, cl.created_at
+         FROM chore_logs cl JOIN chores c ON c.id = cl.chore_id
+        WHERE cl.child_user_id = $1
+        ORDER BY cl.id DESC LIMIT 10`, [userId]);
+    res.json({ points, chores: choresQ.rows, history: histQ.rows });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 子側: お手伝い申請。同一メニューに pending が既にあれば 400。1分10回のレート制限。
+const claimHits = new Map<number, number[]>();
+api.post('/chores/:id/claim', async (req, res) => {
+  const userId = uid(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  const now = Date.now();
+  const hits = (claimHits.get(userId) ?? []).filter((t) => now - t < 60_000);
+  if (hits.length >= 10) return res.status(429).json({ error: '回数制限に達しました。少し待ってから試してください' });
+  hits.push(now);
+  claimHits.set(userId, hits);
+  try {
+    const cQ = await pool.query(
+      `SELECT c.id, c.points FROM chores c JOIN account_links al ON al.id = c.link_id
+        WHERE c.id = $1 AND al.child_user_id = $2 AND c.active`, [id, userId]);
+    const chore = cQ.rows[0];
+    if (!chore) return res.status(404).json({ error: 'not found' });
+    const dupQ = await pool.query(
+      `SELECT 1 FROM chore_logs WHERE chore_id = $1 AND child_user_id = $2 AND status = 'pending'`, [id, userId]);
+    if (dupQ.rows.length) return res.status(400).json({ error: 'もう おうちのひとに つたえてあるよ' });
+    const { rows } = await pool.query(
+      `INSERT INTO chore_logs (chore_id, child_user_id, points) VALUES ($1, $2, $3) RETURNING id`,
+      [id, userId, chore.points]);
+    res.status(201).json({ id: rows[0].id });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 親側: 子のメニュー一覧（active のみ）＋pending 申請＋残高。
+api.get('/children/:childId/chores', async (req, res) => {
+  const parentId = uid(req);
+  const childId = Number(req.params.childId);
+  if (!Number.isInteger(childId)) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const linkQ = await pool.query(
+      `SELECT id FROM account_links WHERE parent_user_id = $1 AND child_user_id = $2`, [parentId, childId]);
+    const linkId = linkQ.rows[0]?.id;
+    if (!linkId) return res.status(404).json({ error: 'not found' });
+    const points = await childChorePoints(childId);
+    const menuQ = await pool.query(
+      `SELECT id, name, points, active FROM chores WHERE link_id = $1 AND active ORDER BY id`, [linkId]);
+    const pendingQ = await pool.query(
+      `SELECT cl.id, c.name AS chore_name, cl.points, cl.created_at
+         FROM chore_logs cl JOIN chores c ON c.id = cl.chore_id
+        WHERE c.link_id = $1 AND cl.status = 'pending'
+        ORDER BY cl.id`, [linkId]);
+    res.json({ points, menu: menuQ.rows, pending: pendingQ.rows });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// 親側: 申請の承認/却下（当事者の親のみ・pending のみ）。承認は残高に加点。
+async function decideChore(req: Request, res: any, approve: boolean) {
+  const parentId = uid(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const logQ = await client.query(
+      `SELECT cl.id, cl.status, cl.points, cl.child_user_id
+         FROM chore_logs cl JOIN chores c ON c.id = cl.chore_id
+         JOIN account_links al ON al.id = c.link_id
+        WHERE cl.id = $1 AND al.parent_user_id = $2 FOR UPDATE OF cl`,
+      [id, parentId]);
+    const log = logQ.rows[0];
+    if (!log) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+    if (log.status !== 'pending') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'もう しょりずみだよ' }); }
+    const status = approve ? 'approved' : 'rejected';
+    await client.query(
+      `UPDATE chore_logs SET status = $1, decided_at = now() WHERE id = $2`, [status, id]);
+    if (approve) {
+      // 残高加点。設定行が無くても安全に作る（ON CONFLICT で加算）。
+      await client.query(
+        `INSERT INTO user_settings (user_id, chore_points) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET chore_points = user_settings.chore_points + EXCLUDED.chore_points`,
+        [log.child_user_id, log.points]);
+    }
+    await client.query('COMMIT');
+    res.json({ status });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    serverError(res, e);
+  } finally {
+    client.release();
+  }
+}
+api.post('/chore-logs/:id/approve', (req, res) => decideChore(req, res, true));
+api.post('/chore-logs/:id/reject', (req, res) => decideChore(req, res, false));
+
+// 子側: ポイントを ¥ かコインへ全額交換（連携不要・残高があれば可）。
+api.post('/chores/exchange', async (req, res) => {
+  const userId = uid(req);
+  const to = (req.body ?? {}).to;
+  if (to !== 'yen' && to !== 'coin') return res.status(400).json({ error: 'to は yen か coin です' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sQ = await client.query(
+      `SELECT chore_points, coins FROM user_settings WHERE user_id = $1 FOR UPDATE`, [userId]);
+    const pt = sQ.rows[0]?.chore_points ?? 0;
+    if (to === 'yen') {
+      if (pt <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'ポイントが ないよ' }); }
+      await client.query(
+        `INSERT INTO incomes (user_id, name, amount) VALUES ($1, $2, $3)`,
+        [userId, 'おてつだいポイント（¥にこうかん）', pt]);
+      await client.query(`UPDATE user_settings SET chore_points = 0 WHERE user_id = $1`, [userId]);
+      await client.query('COMMIT');
+      return res.json({ yen: pt });
+    } else {
+      if (pt < 5) { await client.query('ROLLBACK'); return res.status(400).json({ error: '5ポイントから コインにできるよ' }); }
+      const coins = Math.floor(pt / 5);
+      const rest = pt % 5;
+      await client.query(
+        `UPDATE user_settings SET coins = coins + $1, chore_points = $2 WHERE user_id = $3`,
+        [coins, rest, userId]);
+      await client.query('COMMIT');
+      return res.json({ coins, restPoints: rest });
+    }
   } catch (e) {
     await client.query('ROLLBACK');
     serverError(res, e);

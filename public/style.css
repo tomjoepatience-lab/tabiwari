@@ -22,8 +22,13 @@
 
 * { box-sizing: border-box; }
 
+/* アプリ自体を背景化: 外側背景の露出とオーバースクロール／ピンチズームの余白を無くす。 */
+html { height: 100%; overscroll-behavior: none; }
+
 body {
   margin: 0;
+  min-height: 100%;
+  overscroll-behavior: none;
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -738,7 +743,7 @@ body.theme-kids .bnav-item.active { color: #A9750B; }
 @media (max-width: 600px) { .mode-grid { grid-template-columns: 1fr; } }
 
 /* ======================= こども「マネコタウン」 ======================= */
-body.theme-kids { background: linear-gradient(180deg, #FFF3CF, #FFE9B8); background-attachment: fixed; }
+body.theme-kids { background: linear-gradient(180deg, #FFF3CF, #FFE9B8); }
 .kids-scene {
   position: relative; border-radius: 22px; overflow: hidden;
   background: linear-gradient(180deg, #5FB2EE 0%, #A8DCFA 30%, #FFE2A0 50%, #FFD489 58%, #EFD3A0 72%, #D9AE6E 100%);
@@ -921,18 +926,21 @@ body.theme-adult .card { border: none; border-radius: 20px; box-shadow: 0 4px 14
 
 /* モックの提示背景と同じ生成りの上に、402×840 のスマホ画面を置く。
    こどもは「世界そのものが背景」に見えるよう、フチを生成りではなく空→砂のグラデにする。 */
-body.theme-adult { background: #F6EFE2; }
+/* おとなはホームのキャンバスと完全同色に統一（旧 #F6EFE2 → #F7F4EE）。renderHome が html/body に上書きする。 */
+body.theme-adult { background: #F7F4EE; }
+/* こどもの既定フォールバック（renderHome が stageBackdrop で上書き）。
+   background-attachment:fixed は iOS で効かず、むしろ描画不整合を招くため外す。 */
 body.theme-kids {
   background: linear-gradient(180deg,#7FC0F0 0%,#A8DCFA 24%,#FFE7B0 50%,#EFD3A0 72%,#D9AE6E 100%);
-  background-attachment: fixed;
 }
 .pc-wrap { display: flex; justify-content: center; }
 .pc-canvas {
   position: relative;
   width: 402px; height: 840px;
   overflow: hidden;
-  border-radius: 30px;
-  box-shadow: 0 18px 50px rgba(60,40,10,.22);
+  /* アプリ自体を背景化: カード感（角丸・影）を廃し、キャンバス＝画面の背景そのものに見せる。 */
+  border-radius: 0;
+  box-shadow: none;
   transform-origin: top center;
   flex: 0 0 auto;
 }
@@ -944,7 +952,8 @@ body.theme-kids {
    ホーム（絶対配置840px）で縦がはみ出す場合だけ body スクロールする。 */
 body.theme-kids main, body.theme-adult main {
   margin: 0 auto;
-  padding: 4px 0;
+  /* 上下の 4px 余白を廃止（外側背景の露出を無くす）。safe-area だけ残して standalone のノッチ回避。 */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   max-width: 460px;
   gap: 0;
   min-height: 100dvh;
@@ -1074,10 +1083,10 @@ body.theme-kids main, body.theme-adult main {
 /* ======================================================================
    目標（期限・ペース・ホームのスワイプカード）＋ こども世界観の統一
    ====================================================================== */
-/* PWA standalone でステータスバーに食い込まないように */
+/* PWA standalone でステータスバーに食い込まないように（4px 余白は廃止・safe-area のみ） */
 body.theme-kids main, body.theme-adult main {
-  padding-top: calc(4px + env(safe-area-inset-top));
-  padding-bottom: calc(4px + env(safe-area-inset-bottom));
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* 貯金目標のペース表示（毎月あと¥X） */
@@ -1145,6 +1154,99 @@ body.theme-kids .cm-card { background: #FFFDF6; border: 3px solid #E8B62B; }
 body.theme-kids .cm-title { color: #7A4A00; }
 body.theme-kids .cm-close { background: #F0E4C8; color: #A08A60; }
 .kd-form { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+
+/* ======================================================================
+   👨‍👩‍👧 親子アカウント連携（main.ts settingsPanel）
+   ====================================================================== */
+/* 子リストの1行: 名前＋操作ボタン */
+.link-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px dashed var(--border); }
+.link-row:last-of-type { border-bottom: none; }
+.link-name { font-weight: 800; color: #2E2A24; }
+.link-btns { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+.link-btns .link-btn { padding: 5px 10px; border-radius: 999px; background: #F0EBE0; font-weight: 700; font-size: 12.5px; }
+.link-btns .link-btn:hover { background: #E7E0D2; text-decoration: none; }
+.link-btns .link-btn.danger { background: none; }
+.link-connected { font-weight: 800; color: #2E7D46; }
+body.theme-kids .link-connected { color: #3E9E6C; }
+
+/* 連携コード表示（1文字ずつ間隔・タップで選択しやすく） */
+.link-code-block { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin-top: 10px; }
+.link-code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 30px; font-weight: 800; letter-spacing: .34em;
+  color: #2E2A24; background: #F7F3EA; border: 2px dashed #C9BEA6;
+  border-radius: 14px; padding: 12px 20px; text-align: center;
+  align-self: stretch; user-select: all; -webkit-user-select: all;
+}
+body.theme-kids .link-code { background: #FFF7DE; border-color: #E8B62B; color: #7A4A00; }
+/* こどものコード入力（大きめ・字間） */
+input.link-code-input { font-size: 22px; letter-spacing: .18em; text-align: center; text-transform: uppercase; }
+.link-sent { font-weight: 800; color: #2E7D46; }
+body.theme-kids .link-sent { color: #3E9E6C; }
+
+/* 子のようす モーダル（読み取り専用） */
+.cv { display: flex; flex-direction: column; gap: 12px; }
+.cv-wallet { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  background: #F7F3EA; border-radius: 14px; padding: 12px 16px; }
+.cv-wallet-k { font-size: 13px; font-weight: 800; color: #8C8375; }
+.cv-wallet-v { font-size: 30px; font-weight: 800; color: #2E2A24; }
+.cv-month { display: flex; gap: 10px; }
+.cv-stat { flex: 1; background: #FAF7F0; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.cv-stat span { font-size: 12px; font-weight: 700; color: #8C8375; }
+.cv-stat strong { font-size: 17px; font-weight: 800; color: #2E2A24; }
+.cv-stage { font-size: 14px; font-weight: 800; color: #7A4A00; background: #FFF3CD; border-radius: 999px; padding: 8px 14px; text-align: center; }
+.cv-sec { font-size: 13px; font-weight: 800; color: #8C8375; margin-top: 2px; }
+.cv-goal { display: flex; flex-direction: column; gap: 6px; }
+.cv-goal-head { display: flex; align-items: center; gap: 10px; }
+.cv-goal-nums { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #7A6647; }
+.cv-goal .sv-done-badge { margin-left: auto; }
+.cv-rec { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #F0EBE0; }
+.cv-rec:last-child { border-bottom: none; }
+.cv-rec-date { font-size: 11.5px; font-weight: 700; color: #8C8375; white-space: nowrap; }
+.cv-rec-name { flex: 1; font-weight: 700; color: #2E2A24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-rec-amt { font-weight: 800; color: #2E2A24; white-space: nowrap; }
+
+/* 🧹 おてつだいポイント（子のちょきんタブ・親のモーダル） */
+.chore-badge { margin-left: 8px; font-size: 12px; font-weight: 800; color: #C24242;
+  background: #FDE5E5; border-radius: 999px; padding: 2px 9px; vertical-align: middle; }
+.chore-pts { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  background: #FFF7DE; border-radius: 14px; padding: 12px 16px; margin-bottom: 4px; }
+.chore-pts-k { font-size: 13px; font-weight: 800; color: #8C7A4A; }
+.chore-pts-v { font-size: 28px; font-weight: 800; color: #A9750B; }
+.chore-list { display: flex; flex-direction: column; }
+.chore-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--border); }
+.chore-row:last-child { border-bottom: none; }
+.chore-name { font-weight: 800; color: #2E2A24; }
+.chore-pt { font-size: 12.5px; font-weight: 800; color: #3E9E6C; }
+.chore-do { margin-left: auto; padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 800; }
+.chore-do.waiting { background: #EAE2CF; color: #9A8C6A; box-shadow: none; }
+.chore-ex { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.chore-ex-btn { border-radius: 999px; font-weight: 800; }
+.chore-hist { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.chore-hist-h { font-size: 12px; font-weight: 800; color: #A08A60; margin-top: 4px; }
+.chore-hist-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #7A6647; }
+.chore-hist-name { font-weight: 700; }
+.chore-hist-mark { margin-left: auto; font-weight: 800; }
+.chore-hist-mark.approved { color: #2E9E6C; }
+.chore-hist-mark.rejected { color: #C24242; }
+.chore-hist-mark.pending { color: #C99B2E; }
+/* 親モーダル */
+.chp { display: flex; flex-direction: column; gap: 10px; }
+.chp-pts { font-size: 14px; font-weight: 800; color: #A9750B; background: #FFF7DE; border-radius: 12px; padding: 8px 14px; text-align: center; }
+.chp-sec { font-size: 13px; font-weight: 800; color: #8C8375; margin-top: 2px; }
+.chp-pend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.chp-pname { font-weight: 800; color: #2E2A24; }
+.chp-date { font-size: 11.5px; font-weight: 700; color: #8C8375; }
+.chp-pend .chp-ok, .chp-pend .link-btn.danger { padding: 5px 10px; border-radius: 999px; background: #F0EBE0; font-weight: 700; font-size: 12.5px; }
+.chp-pend .chp-ok { color: #2E7D46; }
+.chp-pend .link-btn:not(:last-child) { margin-left: 0; }
+.chp-pend .chp-ok { margin-left: auto; }
+.chp-done { margin-left: auto; font-weight: 800; color: #2E7D46; }
+.chp-menu { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #F0EBE0; }
+.chp-mname { font-weight: 700; color: #2E2A24; }
+.chp-mpt { font-size: 12.5px; font-weight: 800; color: #3E9E6C; }
+.chp-menu .link-btn.danger { margin-left: auto; }
+.chp-add { align-items: flex-end; margin-top: 6px; }
 
 /* 🎁 プレゼント（衣装ガチャ）モーダル */
 .gacha { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }

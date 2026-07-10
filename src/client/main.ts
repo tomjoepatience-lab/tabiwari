@@ -7,8 +7,9 @@ import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
 import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids';
-import { closeJourney } from './journey';
+import { closeJourney, featuredGoal, currentStage, STAGES } from './journey';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
+import { stageBackdrop } from './stage';
 import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
 import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
@@ -88,10 +89,9 @@ function projectCard(t: Trip) {
 // ホーム以外のタブは、デザインと同じ 402×840 のスマホ画面キャンバスに
 // スクロール領域＋モード別タブバー（2a/3a 忠実移植）を重ねて表示する。
 function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLElement[] {
-  // こどもはどのタブでもマネコタウンの空〜砂の世界観で統一する
-  const bg = mode === 'kids'
-    ? 'linear-gradient(180deg,#5FB2EE 0%,#A8DCFA 24%,#FFE2A0 44%,#FFD489 54%,#EFD3A0 70%,#D9AE6E 100%)'
-    : '#F7F4EE';
+  // こどもはキャンバスを透過にして body のステージ背景（renderHome が敷いた stageBackdrop）を
+  // そのまま透かす（fill タブでも外側背景と完全連続に）。おとなは #F7F4EE で body と同色。
+  const bg = mode === 'kids' ? 'transparent' : '#F7F4EE';
   const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab) : adultNavHtml(active as KidsTab);
   // .pc-scroll とナビは canvas(.pc-canvas) の直下に置く。以前は 840px 固定の内側 div を
   // 挟んでいたため、それが .pc-scroll の包含ブロックになって高さが 840 に固定され、
@@ -107,6 +107,8 @@ function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLE
 
 // 初回だけ: こども / おとな のモード選択
 function renderModePicker() {
+  // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
+  document.documentElement.style.background = document.body.style.background = '';
   const pick = async (mode: AppMode) => {
     try {
       await api.saveSettings({ mode });
@@ -197,6 +199,16 @@ async function renderHome() {
   const mode: AppMode = o.settings.mode;
   document.body.classList.toggle('theme-kids', mode === 'kids');
   document.body.classList.toggle('theme-adult', mode === 'adult');
+  // アプリ自体を背景化: html/body の背景をキャンバス内と連続させ、スクロール/縮小しても
+  // 「アプリの外の背景」が露出しないようにする。kids はステージ背景（kidsHome と同一算出）、
+  // adult はおとなホームのキャンバスと同色 #F7F4EE。
+  {
+    const fg = featuredGoal(o);
+    const bg = mode === 'kids'
+      ? stageBackdrop(fg ? currentStage(fg.saved, fg.target) : 0)
+      : '#F7F4EE';
+    document.documentElement.style.background = document.body.style.background = bg;
+  }
 
   // 直近支出は取れなくてもホーム自体は必ず表示する
   let recentFailed = false;
@@ -324,6 +336,9 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     ]),
   ]));
 
+  // 🧹 おてつだいポイント（親子連携）: ちょきん箱の直後。連携中 or 残高があるときだけ。
+  if (kids && (o.linkedAsChild || o.chorePoints > 0)) out.push(choreKidsCard(o));
+
   // 収入（おこづかい / 給料）
   const amount = el('input', { type: 'number', class: 'price', placeholder: '金額', min: '1', value: kids && o.settings?.allowance ? String(o.settings.allowance) : '' });
   const nameIn = el('input', { class: 'grow', placeholder: kids ? 'おこづかい / おとしだま など' : '給料 / ボーナス など', value: kids ? 'おこづかい' : '給料' });
@@ -413,6 +428,97 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   return out;
 }
 
+// 🧹 子のおてつだいカード（残高・お手伝いリスト・ポイント交換・履歴）
+// savingsPanel は同期なので、カードは即返し・中身は myChores() で後埋めする。
+function choreKidsCard(o: Overview): HTMLElement {
+  const card = el('section', { class: 'card chore-card' }, [el('h2', { textContent: '🧹 おてつだい' })]);
+  const ptsV = el('strong', { class: 'chore-pts-v', textContent: `⭐ ${o.chorePoints} pt` });
+  card.append(el('div', { class: 'chore-pts' }, [
+    el('span', { class: 'chore-pts-k', textContent: 'たまったポイント' }), ptsV,
+  ]));
+  const listWrap = el('div', { class: 'chore-list' });
+  const exWrap = el('div', { class: 'chore-ex' });
+  const histWrap = el('div', { class: 'chore-hist' });
+  card.append(listWrap, exWrap, histWrap);
+
+  // 交換ボタン2つ（ポイントに応じて有効/無効・文言を作り直す）
+  const drawExchange = (points: number) => {
+    const yenBtn = el('button', { class: 'primary chore-ex-btn', textContent: `¥に かえる（${points}pt → ¥${points}）` });
+    yenBtn.disabled = points <= 0;
+    yenBtn.addEventListener('click', async () => {
+      yenBtn.disabled = true;
+      try {
+        const r = await api.exchangePoints('yen') as { yen: number };
+        overviewCache = null;
+        alert(`¥${r.yen} が おさいふに はいったよ！`);
+        await renderHome();
+      } catch (e) { alert((e as Error).message); yenBtn.disabled = false; }
+    });
+    const coins = Math.floor(points / 5);
+    const coinBtn = el('button', { class: 'primary chore-ex-btn', textContent: `コインに かえる（${coins}まい）` });
+    coinBtn.disabled = points < 5;
+    coinBtn.addEventListener('click', async () => {
+      coinBtn.disabled = true;
+      try {
+        const r = await api.exchangePoints('coin') as { coins: number; restPoints: number };
+        overviewCache = null;
+        alert(`コイン ${r.coins}まい ゲット！（のこり ${r.restPoints}pt）`);
+        await renderHome();
+      } catch (e) { alert((e as Error).message); coinBtn.disabled = false; }
+    });
+    exWrap.replaceChildren(yenBtn, coinBtn);
+  };
+
+  // 未連携（残高だけあるケース）: 残高と交換だけ
+  if (!o.linkedAsChild) { drawExchange(o.chorePoints); return card; }
+
+  // 連携中: リスト・履歴を後から埋める
+  drawExchange(o.chorePoints);
+  listWrap.append(el('p', { class: 'muted', textContent: 'よみこみちゅう…' }));
+  void (async () => {
+    let d: Awaited<ReturnType<typeof api.myChores>>;
+    try { d = await api.myChores(); }
+    catch { listWrap.replaceChildren(el('p', { class: 'muted', textContent: 'おてつだいを よみこめませんでした。' })); return; }
+    ptsV.textContent = `⭐ ${d.points} pt`;
+    drawExchange(d.points);
+    listWrap.replaceChildren(...(d.chores.length
+      ? d.chores.map(choreRow)
+      : [el('p', { class: 'muted', textContent: 'おてつだいが まだ ないよ。おうちの人に つくってもらおう！' })]));
+    const hist = d.history.slice(0, 3);
+    if (hist.length) {
+      histWrap.replaceChildren(
+        el('div', { class: 'chore-hist-h', textContent: 'さいきんの できごと' }),
+        ...hist.map((h) => el('div', { class: 'chore-hist-row' }, [
+          el('span', { class: 'chore-hist-name', textContent: `${h.name} +${h.points}pt` }),
+          el('span', { class: 'chore-hist-mark ' + h.status,
+            textContent: h.status === 'approved' ? '✓' : h.status === 'rejected' ? '×' : '⏳' }),
+        ])),
+      );
+    }
+  })();
+  return card;
+}
+
+// お手伝い1行（「やった！」→ claim → 「かくにん まちだよ ⏳」に切替）
+function choreRow(c: { id: number; name: string; points: number; pending: boolean }): HTMLElement {
+  const btn = el('button', { class: 'primary chore-do' });
+  const setPending = () => { btn.textContent = 'かくにん まちだよ ⏳'; btn.disabled = true; btn.classList.add('waiting'); };
+  if (c.pending) setPending();
+  else {
+    btn.textContent = 'やった！';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await api.claimChore(c.id); setPending(); }
+      catch (e) { alert((e as Error).message); btn.disabled = false; }
+    });
+  }
+  return el('div', { class: 'chore-row' }, [
+    el('span', { class: 'chore-name', textContent: c.name }),
+    el('span', { class: 'chore-pt', textContent: `+${c.points}pt` }),
+    btn,
+  ]);
+}
+
 // --- ⚙️ せってい / メニュー ------------------------------------------------
 async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]> {
   const s = o.settings!;
@@ -426,10 +532,14 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     homeTab = 'home';
     await renderHome();
   });
+  // 連携中の子は おとなモードに切り替えできない（サーバーも 403）。ボタンを出さず案内だけ。
+  const modeSwitch: HTMLElement = kids && o.linkedAsChild
+    ? el('p', { class: 'muted', textContent: 'おうちと つながってるあいだは きりかえできないよ' })
+    : modeBtn;
   const modeSec = el('section', { class: 'card' }, [
     el('h2', { textContent: kids ? '⚙️ メニュー' : '⚙️ せってい' }),
     el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ Lv.${s.level} ・ ${s.coins}コイン ・ いまは${kids ? 'こども' : 'おとな'}モード` }),
-    modeBtn,
+    modeSwitch,
   ]);
 
   // お金の設定（モードで出し分け）
@@ -468,8 +578,278 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   });
   const logoutSec = el('section', { class: 'card' }, [el('h2', { textContent: 'アカウント' }), logout]);
 
+  // 👨‍👩‍👧 かぞくと つながる（親子アカウント連携）
+  const familySec = await familyLinkCard(mode, o);
+
   // 1アカウント・1デバイスのシンプル構成（プロジェクト/グループ管理はUIから外した）
-  return [modeSec, moneySec, logoutSec];
+  return [modeSec, familySec, moneySec, logoutSec];
+}
+
+// --- 👨‍👩‍👧 親子アカウント連携 --------------------------------------------
+// おとな: 子リスト（ようすを見る/おこづかい/解除）＋連携コード発行。
+// こども: コード入力でつながる／つながり中の表示・解除。
+// 自分が子として連携中なら、親機能は出さず案内だけ。
+async function familyLinkCard(mode: AppMode, o: Overview): Promise<HTMLElement> {
+  const kids = mode === 'kids';
+  const h2 = el('h2', { textContent: kids ? '👨‍👩‍👧 おうちと つながる' : '👨‍👩‍👧 かぞくと つながる' });
+  // 承認待ちがあれば見出しに🔔バッジ（親のみ）
+  if (!kids && o.pendingChoreCount > 0) h2.append(el('span', { class: 'chore-badge', textContent: `🔔${o.pendingChoreCount}` }));
+  const sec = el('section', { class: 'card' }, [h2]);
+
+  let links: Awaited<ReturnType<typeof api.getLinks>>;
+  try {
+    links = await api.getLinks();
+  } catch {
+    sec.append(el('p', { class: 'muted', textContent: kids ? 'つながり情報を よみこめませんでした。' : '連携情報を読み込めませんでした。' }));
+    return sec;
+  }
+
+  // 自分が子として連携中
+  if (links.asChild) {
+    const parent = links.asChild.username;
+    const linkId = links.asChild.id;
+    if (kids) {
+      sec.append(el('p', { class: 'link-connected', textContent: `✓ ${parent} と つながってるよ` }));
+      const stop = el('button', { class: 'link-btn', textContent: 'つながりを やめる' });
+      stop.addEventListener('click', async () => {
+        if (!confirm(`${parent} との つながりを やめる?（きろくは のこるよ）`)) return;
+        try { await api.deleteLink(linkId); overviewCache = null; await renderHome(); }
+        catch (e) { alert((e as Error).message); }
+      });
+      sec.append(stop);
+    } else {
+      sec.append(el('p', { class: 'muted', textContent: `${parent} と連携中のアカウントです` }));
+    }
+    return sec;
+  }
+
+  // こども・未連携: コード入力でつながる
+  if (kids) {
+    const code = el('input', { class: 'grow link-code-input', type: 'text', placeholder: '8けたの コード', maxLength: 8 });
+    code.setAttribute('autocapitalize', 'characters');
+    code.setAttribute('autocomplete', 'off');
+    const btn = el('button', { class: 'primary', textContent: 'つながる' });
+    btn.addEventListener('click', async () => {
+      const v = code.value.trim();
+      if (!v) { alert('コードを いれてね'); return; }
+      btn.disabled = true;
+      try {
+        const r = await api.joinLink(v);
+        overviewCache = null;
+        alert(`${r.parent.username} と つながったよ！🎉`);
+        await renderHome();
+      } catch (e) { alert((e as Error).message); btn.disabled = false; }
+    });
+    sec.append(
+      el('p', { class: 'muted', textContent: 'おうちの人の コードを いれてね' }),
+      el('div', { class: 'row' }, [labeled('コード', code), btn]),
+    );
+    return sec;
+  }
+
+  // おとな・親: 子リスト
+  if (links.asParent.length) {
+    for (const c of links.asParent) {
+      const view = el('button', { class: 'link-btn', textContent: 'ようすを見る' });
+      const allow = el('button', { class: 'link-btn', textContent: 'おこづかい' });
+      const chore = el('button', { class: 'link-btn', textContent: 'おてつだい' });
+      const unlink = el('button', { class: 'link-btn danger', textContent: '解除' });
+      view.addEventListener('click', () => openChildView(sec, c.child_user_id, c.username));
+      allow.addEventListener('click', () => openAllowance(sec, c.child_user_id, c.username));
+      chore.addEventListener('click', () => openChoreParent(sec, c.child_user_id, c.username));
+      unlink.addEventListener('click', async () => {
+        if (!confirm(`${c.username} との連携を解除する?（データは消えません）`)) return;
+        try { await api.deleteLink(c.id); overviewCache = null; await renderHome(); }
+        catch (e) { alert((e as Error).message); }
+      });
+      sec.append(el('div', { class: 'link-row' }, [
+        el('span', { class: 'link-name', textContent: `👧 ${c.username}` }),
+        el('div', { class: 'link-btns' }, [view, allow, chore, unlink]),
+      ]));
+    }
+  } else {
+    sec.append(el('p', { class: 'muted', textContent: 'まだ つながっているお子さまはいません。下のコードを発行してください。' }));
+  }
+
+  // 連携コード発行
+  const codeWrap = el('div', { class: 'link-code-block' });
+  const issueBtn = el('button', { class: 'primary', textContent: '連携コードを発行' });
+  const showIssueBtn = () => codeWrap.replaceChildren(issueBtn);
+  issueBtn.addEventListener('click', async () => {
+    issueBtn.disabled = true;
+    try {
+      const r = await api.createLinkCode();
+      const codeEl = el('div', { class: 'link-code', textContent: r.code });
+      const help = el('p', { class: 'muted', textContent: '10分間ゆうこう。お子さまの「メニュー → おうちと つながる」で入力してください。' });
+      const again = el('button', { class: 'link-btn', textContent: '再発行' });
+      again.addEventListener('click', () => { issueBtn.disabled = false; showIssueBtn(); });
+      codeWrap.replaceChildren(codeEl, help, again);
+    } catch (e) { alert((e as Error).message); issueBtn.disabled = false; }
+  });
+  showIssueBtn();
+  sec.append(codeWrap);
+  return sec;
+}
+
+// 親から見る「子のようす」（読み取り専用モーダル）
+async function openChildView(anchor: HTMLElement, childId: number, username: string) {
+  let d: Awaited<ReturnType<typeof api.childOverview>>;
+  try { d = await api.childOverview(childId); }
+  catch (e) { alert((e as Error).message); return; }
+
+  const fg = featuredGoal({ goals: d.goals } as unknown as Overview);
+  const stage = fg ? currentStage(fg.saved, fg.target) : 0;
+  const pct = fg ? Math.max(0, Math.min(100, Math.floor((fg.saved / fg.target) * 100))) : 0;
+
+  const body = el('div', { class: 'cv' }, [
+    el('div', { class: 'cv-wallet' }, [
+      el('span', { class: 'cv-wallet-k', textContent: 'おさいふ' }),
+      el('strong', { class: 'cv-wallet-v', textContent: yen(d.wallet) }),
+    ]),
+    el('div', { class: 'cv-month' }, [
+      el('div', { class: 'cv-stat' }, [el('span', { textContent: '今月つかった' }), el('strong', { textContent: yen(d.month.spend) })]),
+      el('div', { class: 'cv-stat' }, [el('span', { textContent: '今月もらった' }), el('strong', { textContent: yen(d.month.income) })]),
+    ]),
+    el('div', { class: 'cv-stage', textContent: `🗺 いま ${STAGES[stage].name}（${pct}%）` }),
+  ]);
+
+  if (d.goals.length) {
+    body.append(el('div', { class: 'cv-sec', textContent: '⭐ もくひょう' }));
+    for (const g of d.goals) {
+      const p = Math.min(100, Math.round((g.saved / g.target) * 100));
+      const fill = el('div', { class: 'sv-fill' + (g.done ? ' done' : '') });
+      fill.style.width = p + '%';
+      body.append(el('div', { class: 'cv-goal' }, [
+        el('div', { class: 'cv-goal-head' }, [
+          el('strong', { textContent: `${g.emoji ?? '⭐'} ${g.name}` }),
+          g.done
+            ? el('span', { class: 'sv-done-badge', textContent: 'たっせい！🎉' })
+            : el('span', { class: 'cv-goal-nums', textContent: `${yen(g.saved)} / ${yen(g.target)}` }),
+        ]),
+        el('div', { class: 'sv-bar' }, [fill]),
+      ]));
+    }
+  }
+
+  if (d.recent.length) {
+    body.append(el('div', { class: 'cv-sec', textContent: '🧾 さいきんの きろく' }));
+    for (const r of d.recent.slice(0, 5)) {
+      body.append(el('div', { class: 'cv-rec' }, [
+        el('span', { class: 'cv-rec-date', textContent: fmtDate(r.purchased_on) }),
+        el('span', { class: 'cv-rec-name', textContent: r.store_name || r.first_item || 'かいもの' }),
+        el('strong', { class: 'cv-rec-amt', textContent: yen(r.total) }),
+      ]));
+    }
+  }
+
+  canvasModal(anchor, body, { title: `👧 ${username}` });
+}
+
+// 親から子へ おこづかいを送る（モーダル内で完結）
+function openAllowance(anchor: HTMLElement, childId: number, username: string) {
+  const amt = el('input', { type: 'number', class: 'price', placeholder: '金額', min: '1' });
+  const btn = el('button', { class: 'primary', textContent: '送る' });
+  const msg = el('p', { class: 'link-sent' });
+  const body = el('div', { class: 'kd-form' }, [
+    el('p', { class: 'muted', textContent: `${username} に おこづかいを 送ります` }),
+    labeled('金額', amt),
+    el('div', { class: 'center' }, [btn]),
+    msg,
+  ]);
+  canvasModal(anchor, body, { title: '🎁 おこづかい' });
+  btn.addEventListener('click', async () => {
+    const v = Math.round(Number(amt.value));
+    if (!Number.isFinite(v) || v <= 0) { alert('金額を入れてね'); return; }
+    btn.disabled = true;
+    try {
+      await api.sendAllowance(childId, v);
+      overviewCache = null;
+      msg.textContent = `¥${v.toLocaleString('ja-JP')} を送りました 🎁`;
+      amt.disabled = true;
+      btn.textContent = '送りました';
+    } catch (e) { alert((e as Error).message); btn.disabled = false; }
+  });
+}
+
+// 🧹 親のお手伝い管理（承認待ちの承認/却下＋メニュー追加/削除）
+function openChoreParent(anchor: HTMLElement, childId: number, username: string) {
+  const body = el('div', { class: 'chp' }, [el('p', { class: 'muted', textContent: 'よみこみちゅう…' })]);
+  const overlay = canvasModal(anchor, body, { title: `🧹 ${username} の おてつだい` });
+  // 閉じたら承認待ちバッジ更新のため overview を取り直してホーム再描画
+  const onClose = () => { overviewCache = null; void renderHome(); };
+  overlay.querySelector('.cm-close')?.addEventListener('click', onClose);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) onClose(); });
+
+  const reload = async () => {
+    let d: Awaited<ReturnType<typeof api.childChores>>;
+    try { d = await api.childChores(childId); }
+    catch (e) { body.replaceChildren(el('p', { class: 'muted', textContent: (e as Error).message })); return; }
+
+    const parts: HTMLElement[] = [
+      el('div', { class: 'chp-pts', textContent: `いまのポイント: ⭐ ${d.points} pt` }),
+      el('div', { class: 'chp-sec', textContent: '⏳ しょうにん まち' }),
+    ];
+    if (!d.pending.length) {
+      parts.push(el('p', { class: 'muted', textContent: 'まっている おてつだいは ないよ。' }));
+    } else {
+      for (const p of d.pending) {
+        const ok = el('button', { class: 'link-btn chp-ok', textContent: 'よくできました ✓' });
+        const ng = el('button', { class: 'link-btn danger', textContent: 'まだだよ ×' });
+        const row = el('div', { class: 'chp-pend' }, [
+          el('span', { class: 'chp-pname', textContent: `${p.chore_name} +${p.points}pt` }),
+          el('span', { class: 'chp-date', textContent: fmtDate(p.created_at) }),
+          ok, ng,
+        ]);
+        ok.addEventListener('click', async () => {
+          ok.disabled = true; ng.disabled = true;
+          try {
+            await api.decideChore(p.id, true);
+            overviewCache = null;
+            row.replaceChildren(el('span', { class: 'chp-done', textContent: `+${p.points}pt を あげました` }));
+            setTimeout(() => { void reload(); }, 800);
+          } catch (e) { alert((e as Error).message); ok.disabled = false; ng.disabled = false; }
+        });
+        ng.addEventListener('click', async () => {
+          ok.disabled = true; ng.disabled = true;
+          try { await api.decideChore(p.id, false); overviewCache = null; row.remove(); }
+          catch (e) { alert((e as Error).message); ok.disabled = false; ng.disabled = false; }
+        });
+        parts.push(row);
+      }
+    }
+
+    parts.push(el('div', { class: 'chp-sec', textContent: '🧹 おてつだい メニュー' }));
+    for (const m of d.menu.filter((x) => x.active)) {
+      const del = el('button', { class: 'link-btn danger', textContent: '削除' });
+      del.addEventListener('click', async () => {
+        if (!confirm(`「${m.name}」を さくじょする?`)) return;
+        try { await api.deleteChore(m.id); await reload(); }
+        catch (e) { alert((e as Error).message); }
+      });
+      parts.push(el('div', { class: 'chp-menu' }, [
+        el('span', { class: 'chp-mname', textContent: m.name }),
+        el('span', { class: 'chp-mpt', textContent: `+${m.points}pt` }),
+        del,
+      ]));
+    }
+
+    // 追加フォーム
+    const nameIn = el('input', { class: 'grow', placeholder: 'なまえ（れい: おふろそうじ）' });
+    const ptIn = el('input', { type: 'number', class: 'price', placeholder: 'pt', min: '1' });
+    const addBtn = el('button', { class: 'primary', textContent: '追加' });
+    addBtn.addEventListener('click', async () => {
+      const nm = nameIn.value.trim();
+      const pt = Math.round(Number(ptIn.value));
+      if (!nm || !Number.isFinite(pt) || pt <= 0) { alert('なまえと ポイントを いれてね'); return; }
+      addBtn.disabled = true;
+      try { await api.addChore(childId, { name: nm, points: pt }); await reload(); }
+      catch (e) { alert((e as Error).message); addBtn.disabled = false; }
+    });
+    parts.push(el('div', { class: 'chp-add row' }, [labeled('なまえ', nameIn), labeled('pt', ptIn), addBtn]));
+
+    body.replaceChildren(...parts);
+  };
+  void reload();
 }
 
 // --- ✏️ きろく（ワンタップ記録） ------------------------------------------
@@ -1634,6 +2014,8 @@ function dateRange(a: string | null, b: string | null) {
 
 // --- 認証ゲート -------------------------------------------------------
 function renderAuth() {
+  // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
+  document.documentElement.style.background = document.body.style.background = '';
   let mode: 'login' | 'register' = 'login';
   const username = el('input', { name: 'username', placeholder: 'ユーザー名', autocomplete: 'username' });
   const password = el('input', { name: 'password', type: 'password', placeholder: 'パスワード', autocomplete: 'current-password' });
