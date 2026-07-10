@@ -17,19 +17,20 @@ function getClient(): Anthropic {
 }
 
 export type Draft = { name: string; price: number };
-export type OcrResult = { store_name: string; purchased_on: string; category: string; items: Draft[] };
+export type OcrResult = { store_name: string; purchased_on: string; category: string; address: string; items: Draft[] };
 
 const SYSTEM = '日本のレシート画像から購入した商品明細を正確に抽出するアシスタント。出力はJSONのみ。';
 
 const USER_TEXT = [
   'このレシート画像から購入した商品の明細を抽出してください。',
   '次のJSONだけを出力してください（説明文やコードフェンスは不要）:',
-  '{"store_name":"店名","purchased_on":"YYYY-MM-DD","category":"食費|交通|宿泊|観光|買い物|その他","items":[{"name":"商品名","price":整数の円}]}',
+  '{"store_name":"店名","purchased_on":"YYYY-MM-DD","category":"食費|交通|宿泊|観光|買い物|その他","address":"店舗住所","items":[{"name":"商品名","price":整数の円}]}',
   'ルール:',
   '- 合計・小計・税・お預り・お釣り・ポイント・支払い等の行は items に含めない（購入した商品のみ）。',
   '- price は円の整数（カンマや¥記号は除く）。',
   '- 日付が読めなければ purchased_on は空文字。',
   '- category は内容から最も近いものを1つ選ぶ。',
+  '- address はレシートに印字された店舗の住所（都道府県〜番地）。読めなければ空文字。',
 ].join('\n');
 
 let loggedProvider = false;
@@ -134,6 +135,7 @@ function normalize(raw: any): OcrResult {
     store_name: String(raw?.store_name ?? ''),
     purchased_on: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '',
     category: String(raw?.category ?? ''),
+    address: String(raw?.address ?? '').trim(),
     items,
   };
 }

@@ -6,6 +6,7 @@ export type OcrResult = {
   store_name: string;
   purchased_on: string;
   category: string;
+  address: string;
   items: Draft[];
 };
 

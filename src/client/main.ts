@@ -893,18 +893,64 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
   // 追加の品（任意・軽量）
   const extraRows: { name: HTMLInputElement; price: HTMLInputElement }[] = [];
   const extraWrap = el('div', { class: 'stack' });
-  const addRowBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 品をふやす' });
-  addRowBtn.addEventListener('click', () => {
+  const addExtraRow = (): { name: HTMLInputElement; price: HTMLInputElement } => {
     const n = el('input', { class: 'grow', placeholder: '品名' });
     const p = el('input', { class: 'price', type: 'number', inputMode: 'numeric', placeholder: '金額', min: '1' });
-    extraRows.push({ name: n, price: p });
+    const row = { name: n, price: p };
+    extraRows.push(row);
     extraWrap.append(el('div', { class: 'row' }, [n, p]));
+    return row;
+  };
+  const addRowBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 品をふやす' });
+  addRowBtn.addEventListener('click', () => { addExtraRow(); });
+
+  // 🧾 レシート読み取り（Gemini/Claude vision OCR）→ 品名・金額・お店・日付を自動入力
+  // capture は付けない（iOSでカメラ直起動になりアルバム選択を塞ぐ。おとな詳細フォームと同挙動）
+  const ocrInput = el('input', { type: 'file', accept: 'image/*' });
+  ocrInput.style.display = 'none';
+  const ocrBtn = el('button', { type: 'button', class: 'af-ocr', textContent: kids ? '🧾 レシートを よみとって じどうにゅうりょく' : '🧾 レシートを読み取って自動入力' });
+  ocrBtn.addEventListener('click', () => ocrInput.click());
+  ocrInput.addEventListener('change', async () => {
+    const f = ocrInput.files?.[0];
+    ocrInput.value = '';
+    if (!f) return;
+    ocrBtn.disabled = true;
+    const orig = ocrBtn.textContent;
+    ocrBtn.textContent = 'よみとりちゅう…';
+    try {
+      const dataUrl = await resizeImage(f, 1280, 0.8);
+      const r = await runOcr(dataUrl);
+      if (!r.items.length) {
+        alert(kids ? 'うまく よみとれなかったよ。あかるいところで まっすぐ とってみてね' : 'レシートを読み取れませんでした。明るい場所でまっすぐ撮ってみてください。');
+        return;
+      }
+      if (r.store_name) storeInput.value = r.store_name;
+      if (r.purchased_on) dateInput.value = r.purchased_on;
+      // items[0] をメイン欄へ、items[1..] を追加行へ流し込む（既存の追加行は置き換え）
+      nameInput.value = r.items[0].name;
+      priceInput.value = String(r.items[0].price);
+      extraRows.splice(0);
+      extraWrap.replaceChildren();
+      for (const it of r.items.slice(1)) {
+        const row = addExtraRow();
+        row.name.value = it.name;
+        row.price.value = String(it.price);
+      }
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      ocrBtn.disabled = false;
+      ocrBtn.textContent = orig;
+    }
   });
 
   const saveBtn = el('button', { type: 'submit', class: 'primary big-add', textContent: kids ? '🐱 きろくする！' : '🐱 記録する' });
   const form = el('form', { class: 'card quick-card' }, [
     el('h2', { textContent: kids ? '✏️ おかいものメモ' : '✏️ きろく（かんたん記録）' }),
     el('p', { class: 'muted', textContent: kids ? 'なまえと金額だけでOK。きろくするとマネコがよろこぶよ！' : '品名と金額だけでOK。マネコがホームで反応するよ。' }),
+    ocrBtn,
+    ocrInput,
+    el('p', { class: 'muted af-ocr-note', textContent: kids ? 'レシートは よみとりに つかうだけ。しゃしんは ほぞんしないよ。' : 'レシートは読み取りに使うだけで、画像は保存しません。' }),
     el('div', { class: 'quick-amount-row' }, [el('span', { class: 'quick-yen', textContent: '¥' }), priceInput]),
     labeled('なにを買った?', nameInput),
     chipRow,

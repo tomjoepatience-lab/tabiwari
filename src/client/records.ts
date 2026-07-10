@@ -4,6 +4,7 @@ import { el, yen, labeled, todayIso } from './ui';
 import { esc } from './phone';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
+import { searchPlaces } from './geo';
 import { GENRES, classifyItem, Genre } from '../shared/genre';
 
 // ---- キャンバス内モーダル（402pxのスマホ画面の中に重ねるカード） --------
@@ -231,6 +232,20 @@ export function adultAddForm(a: AddFormArgs): HTMLElement[] {
         row.price.value = String(it.price);
         row.name.dispatchEvent(new Event('input'));  // 自動ジャンル
         row.price.dispatchEvent(new Event('input')); // 合計更新
+      }
+      // 場所が未設定なら、住所（無ければ店名）で1回だけジオコーディングして自動ピン。
+      // ヒットなし/エラーは無言でスキップ（従来の手動フローのまま）。
+      if (!place) {
+        const q = (r.address || r.store_name || '').trim();
+        if (q) {
+          try {
+            const hits = await searchPlaces(q);
+            if (hits.length) {
+              place = { lat: hits[0].lat, lng: hits[0].lon, name: r.store_name || hits[0].name || null };
+              syncPlace();
+            }
+          } catch { /* 自動ピンは失敗しても無視 */ }
+        }
       }
     } catch (e) {
       alert((e as Error).message);

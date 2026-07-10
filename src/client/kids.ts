@@ -54,15 +54,15 @@ export function kidsNavHtml(active: KidsTab): string {
   const lbl = (tab: KidsTab, color: string, text: string) =>
     `<span style="font-size:11px;font-weight:800;color:${color};background:${active === tab ? '#FFD54A' : 'rgba(255,253,246,.9)'};border-radius:999px;padding:1px 9px">${text}</span>`;
   return `
-  <div style="position:absolute;left:0;right:0;bottom:26px;display:flex;justify-content:center;align-items:flex-end;gap:14px;z-index:1200">
-    <div data-nav="home" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+  <div style="position:absolute;left:0;right:0;bottom:26px;display:flex;justify-content:center;align-items:flex-end;gap:14px;z-index:1200;pointer-events:none">
+    <div data-nav="home" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="width:52px;height:52px;border-radius:50%;border:3.5px solid #FFFDF6;background:radial-gradient(circle at 35% 30%, #FFC94D, #F5A623);box-shadow:0 5px 12px rgba(120,80,20,.35);display:flex;flex-direction:column;align-items:center;justify-content:center">
         <div style="width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-bottom:9px solid #FFFDF6"></div>
         <div style="width:15px;height:10px;background:#FFFDF6;border-radius:0 0 3px 3px"></div>
       </div>
       ${lbl('home', '#7A4A00', 'ホーム')}
     </div>
-    <div data-nav="report" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+    <div data-nav="report" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="width:52px;height:52px;border-radius:50%;border:3.5px solid #FFFDF6;background:radial-gradient(circle at 35% 30%, #7FB3DE, #4E7FB5);box-shadow:0 5px 12px rgba(50,80,120,.35);display:flex;align-items:flex-end;justify-content:center;gap:2.5px;padding-bottom:15px">
         <div style="width:5px;height:9px;border-radius:2px;background:#FFFDF6"></div>
         <div style="width:5px;height:14px;border-radius:2px;background:#FFFDF6"></div>
@@ -70,13 +70,13 @@ export function kidsNavHtml(active: KidsTab): string {
       </div>
       ${lbl('report', '#39628F', 'レポート')}
     </div>
-    <div data-nav="add" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:8px;cursor:pointer">
+    <div data-nav="add" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:8px;cursor:pointer;pointer-events:auto">
       <div style="width:82px;height:82px;border-radius:50%;border:4px solid #FFFDF6;background:radial-gradient(circle at 35% 28%, #FFEFAE, #FFD54A 50%, #DFA318);box-shadow:0 8px 20px rgba(150,95,10,.45), inset 0 -8px 12px rgba(160,100,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;animation:mfloat2 2.6s ease-in-out infinite">
         <span style="font-size:19px;font-weight:800;color:#7A4A00;line-height:1.1">きろく</span>
         <span style="font-size:10px;font-weight:800;color:#A9750B">おこづかい帳</span>
       </div>
     </div>
-    <div data-nav="savings" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;position:relative">
+    <div data-nav="savings" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;position:relative;pointer-events:auto">
       <div style="width:52px;height:52px;border-radius:50%;border:3.5px solid #FFFDF6;background:radial-gradient(circle at 35% 30%, #F0A0B8, #D96A8A);box-shadow:0 5px 12px rgba(150,60,90,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5px">
         <div style="width:22px;height:6px;border-radius:50%;background:#FFFDF6;opacity:.7"></div>
         <div style="width:22px;height:6px;border-radius:50%;background:#FFFDF6;opacity:.85"></div>
@@ -84,7 +84,7 @@ export function kidsNavHtml(active: KidsTab): string {
       </div>
       ${lbl('savings', '#B9506E', 'ちょきん')}
     </div>
-    <div data-nav="menu" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+    <div data-nav="menu" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="width:52px;height:52px;border-radius:50%;border:3.5px solid #FFFDF6;background:radial-gradient(circle at 35% 30%, #A88ECB, #7A5BA8);box-shadow:0 5px 12px rgba(80,50,120,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
         <div style="width:22px;height:3.5px;border-radius:2px;background:#FFFDF6"></div>
         <div style="width:22px;height:3.5px;border-radius:2px;background:#FFFDF6"></div>

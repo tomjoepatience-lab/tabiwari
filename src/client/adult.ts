@@ -101,15 +101,15 @@ export function adultNavHtml(active: KidsTab): string {
   const c = (tab: KidsTab) => (active === tab ? '#C99B2E' : '#B8AE9C');
   const t = (tab: KidsTab) => (active === tab ? '#C99B2E' : '#8C8375');
   return `
-  <div style="position:absolute;left:0;right:0;bottom:0;height:84px;background:#FFFFFF;box-shadow:0 -6px 20px rgba(60,50,30,.08);display:flex;align-items:flex-start;justify-content:space-around;padding:12px 10px 0;z-index:1200">
-    <div data-nav="home" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+  <div style="position:absolute;left:0;right:0;bottom:0;height:84px;background:#FFFFFF;box-shadow:0 -6px 20px rgba(60,50,30,.08);display:flex;align-items:flex-start;justify-content:space-around;padding:12px 10px 0;z-index:1200;pointer-events:none">
+    <div data-nav="home" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="display:flex;flex-direction:column;align-items:center">
         <div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:8px solid ${c('home')}"></div>
         <div style="width:13px;height:9px;background:${c('home')};border-radius:0 0 2px 2px"></div>
       </div>
       <span style="font-size:10px;font-weight:800;color:${t('home')}">ホーム</span>
     </div>
-    <div data-nav="report" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+    <div data-nav="report" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="display:flex;align-items:flex-end;gap:2px;height:17px">
         <div style="width:5px;height:8px;border-radius:1.5px;background:${c('report')}"></div>
         <div style="width:5px;height:14px;border-radius:1.5px;background:${c('report')}"></div>
@@ -117,7 +117,7 @@ export function adultNavHtml(active: KidsTab): string {
       </div>
       <span style="font-size:10px;font-weight:800;color:${t('report')}">レポート</span>
     </div>
-    <div data-nav="add" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;margin-top:-26px;cursor:pointer">
+    <div data-nav="add" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;margin-top:-26px;cursor:pointer;pointer-events:auto">
       <div style="width:56px;height:56px;border-radius:50%;background:#2E2A24;box-shadow:0 8px 18px rgba(46,42,36,.35);display:flex;align-items:center;justify-content:center">
         <div style="position:relative;width:20px;height:20px">
           <div style="position:absolute;left:8px;top:0;width:4px;height:20px;border-radius:2px;background:#E3C56A"></div>
@@ -126,7 +126,7 @@ export function adultNavHtml(active: KidsTab): string {
       </div>
       <span style="font-size:10px;font-weight:800;color:${t('add')}">きろく</span>
     </div>
-    <div data-nav="savings" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+    <div data-nav="savings" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="display:flex;flex-direction:column;align-items:center;gap:1.5px">
         <div style="width:17px;height:5px;border-radius:50%;background:${c('savings')}"></div>
         <div style="width:17px;height:5px;border-radius:50%;background:${c('savings')}"></div>
@@ -134,7 +134,7 @@ export function adultNavHtml(active: KidsTab): string {
       </div>
       <span style="font-size:10px;font-weight:800;color:${t('savings')}">ちょきん</span>
     </div>
-    <div data-nav="menu" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
+    <div data-nav="menu" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;pointer-events:auto">
       <div style="display:flex;flex-direction:column;gap:3.5px;padding-top:2px">
         <div style="width:18px;height:3px;border-radius:2px;background:${c('menu')}"></div>
         <div style="width:18px;height:3px;border-radius:2px;background:${c('menu')}"></div>
