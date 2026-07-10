@@ -6,7 +6,7 @@
 import { Overview, SavingsGoal } from './api';
 import { el, yen } from './ui';
 import { esc } from './phone';
-import { manekoHtml, stageAccessoriesHtml } from './maneko';
+import { manekoHtml, stageAccessoriesHtml, gachaAccessoriesHtml } from './maneko';
 
 // ---- 旅の進捗モデル ------------------------------------------------------
 // 目標がまだ無いときのフォールバック（0除算回避＆マップが成立する最小値）。
@@ -415,7 +415,7 @@ function cardHtml(i: number, goal: number, state: 'done' | 'current' | 'locked')
 }
 
 // ---- マネコ（現在地） ---------------------------------------------------
-function catHtml(stage: number): string {
+function catHtml(stage: number, equipped: string[]): string {
   const top = CAT_TOP[stage];
   const acc = stageAccessoriesHtml(stage);
   return `
@@ -431,6 +431,7 @@ function catHtml(stage: number): string {
         ${acc.back}
         ${manekoHtml({ collar: false })}
         ${acc.front}
+        ${gachaAccessoriesHtml(equipped)}
       </div>
     </div>`;
 }
@@ -476,6 +477,7 @@ export function journeyView(o: Overview, goalId?: number): HTMLElement {
 
   // 選択目標でオーバーレイの中身を（再）構築する。
   // preferSavedScroll: 初回のみ true（保存スクロールを復元）。切替時は現在地センター優先。
+  const equipped = o.settings?.costumes?.equipped ?? [];
   const render = (preferSavedScroll: boolean) => {
     const goalAmt = sel && sel.target > 0 ? sel.target : GOAL_FALLBACK;
     const total = sel ? Math.max(0, sel.saved) : 0;
@@ -514,7 +516,7 @@ export function journeyView(o: Overview, goalId?: number): HTMLElement {
         ${sceneryHtml()}
         ${nodes}
         ${cards}
-        ${catHtml(stage)}
+        ${catHtml(stage, equipped)}
       </div>
     </div>
     <!-- 上部HUD（fixed） -->

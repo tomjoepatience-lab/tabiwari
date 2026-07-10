@@ -1,13 +1,13 @@
 // こどもモード「マネコタウン」ホーム — デザイン 2a (maneko-home-game-2a.dc.html) の忠実移植。
 // マークアップ・色・寸法・アニメーションはモックのまま、数値だけ実データを注入する。
-import { Overview, QuickReward, RecentReceipt } from './api';
+import { api, Overview, QuickReward, RecentReceipt } from './api';
 import { yen, el, labeled } from './ui';
 import { phoneCanvas, esc } from './phone';
 import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { canvasModal } from './records';
 import { featuredGoal, currentStage, journeyPercent, STAGES, openJourney } from './journey';
-import { manekoHtml, stageAccessoriesHtml } from './maneko';
+import { manekoHtml, stageAccessoriesHtml, gachaAccessoriesHtml, COSTUMES } from './maneko';
 import { STAGE_INFO, stageSceneryHtml, stageBuyIconHtml } from './stage';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
@@ -18,9 +18,10 @@ export interface KidsHomeArgs {
   insight: Insight;
   celebrate: { kind: ReactionKind; name: string; reward?: QuickReward } | null;
   goTab(tab: KidsTab): void;
-  onPresent(): Promise<{ costume: string; coins: number } | null>;
+  onPresent(): Promise<{ costume: string; name: string; rarity: string; coins: number } | null>;
   onDeposit(goalId: number, amount: number): void;      // 🐷ちょきんばこから
   onCreateGoal(body: { name: string; emoji: string; target: number; deadline?: string }): void; // 掲示板から
+  onCostumeChanged(): void;                             // 🎁ガチャで所持/装備が変わった→ホーム再描画で猫へ反映
 }
 
 // マネコのおしゃべりタイマー（renderHome が画面を作り直すたびに止める）。
@@ -152,6 +153,7 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
       ${acc.back}
       ${manekoHtml({ collar: false })}
       ${acc.front}
+      <div id="k-gacha" style="position:absolute;inset:0;pointer-events:none">${gachaAccessoriesHtml(s.costumes?.equipped ?? [])}</div>
     </div>
 
     <!-- マネコのふきだし（じぶんからおしゃべりする） -->
@@ -384,18 +386,123 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     });
   });
 
-  // プレゼント（30コインで衣装ガチャ）
-  canvas.querySelector('#k-present')?.addEventListener('click', async () => {
-    if (s.coins < 30) {
-      showToast(`プレゼントは30コインであくよ（いま ${s.coins} コイン）`);
-      return;
+  // プレゼント（🎁 衣装ガチャ）: モーダルで開封＋所持一覧＋つける/はずす
+  const PRICE = 30;
+  const presentBoxHtml = `
+    <div class="gc-box" style="position:relative;width:92px;height:82px;margin:0 auto">
+      <div style="position:absolute;left:6px;bottom:0;width:80px;height:52px;border-radius:8px;background:linear-gradient(180deg,#E8483F,#B92626);box-shadow:inset 0 -6px 8px rgba(100,10,10,.4)"></div>
+      <div style="position:absolute;left:0;bottom:44px;width:92px;height:22px;border-radius:6px;background:linear-gradient(180deg,#FF6B5E,#D93A32)"></div>
+      <div style="position:absolute;left:40px;bottom:0;width:12px;height:66px;background:#FFD54A"></div>
+      <div style="position:absolute;left:22px;bottom:60px;width:18px;height:18px;border-radius:50% 50% 0 50%;border:5px solid #FFD54A;background:transparent"></div>
+      <div style="position:absolute;left:52px;bottom:60px;width:18px;height:18px;border-radius:50% 50% 50% 0;border:5px solid #FFD54A;background:transparent"></div>
+    </div>`;
+
+  const openPresentModal = () => {
+    let coins = s.coins;
+    const owned = [...(s.costumes?.owned ?? [])];
+    const equipped = [...(s.costumes?.equipped ?? [])];
+    let changed = false;
+
+    const kGacha = canvas.querySelector<HTMLElement>('#k-gacha');
+    const syncCat = () => { if (kGacha) kGacha.innerHTML = gachaAccessoriesHtml(equipped); };
+
+    const body = el('div', { class: 'gacha' });
+    body.innerHTML = `
+      <div class="gc-stage">${presentBoxHtml}<div class="gc-burst"></div></div>
+      <div class="gc-price"></div>
+      <div class="gc-hint">もっているもの</div>
+      <div class="gc-grid"></div>`;
+    const overlay = canvasModal(canvas, body, { title: '🎁 プレゼント' });
+    // 閉じたとき（✕・背景タップどの経路でも）、開封/装備が動いていればホーム再描画で猫へ確実に反映。
+    // canvasModal のどの閉じ方も最終的に overlay.remove() を通るので、そこにフックする。
+    const origRemove = overlay.remove.bind(overlay);
+    let notified = false;
+    overlay.remove = () => {
+      origRemove();
+      if (changed && !notified) { notified = true; a.onCostumeChanged(); }
+    };
+
+    const priceEl = body.querySelector<HTMLElement>('.gc-price')!;
+    const gridEl = body.querySelector<HTMLElement>('.gc-grid')!;
+    const burstEl = body.querySelector<HTMLElement>('.gc-burst')!;
+
+    const spawnBurst = (name: string, rarity: string) => {
+      const boxEl = body.querySelector<HTMLElement>('.gc-box');
+      if (boxEl) { boxEl.style.animation = 'gcshake .5s ease-in-out'; window.setTimeout(() => { boxEl.style.animation = ''; }, 520); }
+      const colors = ['#E8483F', '#F5C542', '#39B7B7', '#F06292', '#7CC44E', '#FFD54A'];
+      let pieces = '';
+      for (let i = 0; i < 12; i++) {
+        const x = 4 + Math.round(Math.random() * 90);
+        const delay = (Math.random() * 0.3).toFixed(2);
+        pieces += `<div style="position:absolute;left:${x}%;top:-8px;width:8px;height:12px;background:${colors[i % colors.length]};border-radius:2px;opacity:0;animation:gcfall 1.1s linear ${delay}s"></div>`;
+      }
+      const rl = rarity === 'super' ? '✨スーパーレア！' : rarity === 'rare' ? 'レア！' : '';
+      burstEl.innerHTML = pieces + `<div class="gc-get">${rl ? `<span class="gc-rl gc-${esc(rarity)}">${rl}</span>` : ''}<span>${esc(name)} をゲット！</span></div>`;
+      window.setTimeout(() => burstEl.querySelector('.gc-get')?.classList.add('show'), 40);
+    };
+
+    const doOpen = async () => {
+      const btn = priceEl.querySelector<HTMLButtonElement>('.gc-open');
+      if (btn) btn.disabled = true;
+      const r = await a.onPresent();
+      if (!r) { renderPrice(); return; }   // 失敗（main 側で通知済み）
+      coins = r.coins;
+      // サーバーは当選衣装を owned＋equipped の両方に追加（自動装備）するので、ローカルも揃える
+      if (!owned.includes(r.costume)) owned.push(r.costume);
+      if (!equipped.includes(r.costume)) equipped.push(r.costume);
+      changed = true;
+      spawnBurst(r.name, r.rarity);
+      window.setTimeout(() => { renderPrice(); renderGrid(); syncCat(); }, 620);
+    };
+
+    function renderPrice() {
+      if (owned.length >= COSTUMES.length) {
+        priceEl.innerHTML = `<div class="gc-complete">🎉 コンプリート！ぜんぶ あつめたね！</div>`;
+        return;
+      }
+      if (coins < PRICE) {
+        priceEl.innerHTML = `
+          <div class="gc-cost">1かい ${PRICE}コイン（いま ${coins} コイン）</div>
+          <button class="gc-open" type="button" disabled>ひらける！</button>
+          <div class="gc-need">あと ${PRICE - coins} コインで ひらけるよ</div>`;
+        return;
+      }
+      priceEl.innerHTML = `
+        <div class="gc-cost">1かい ${PRICE}コイン（いま ${coins} コイン）</div>
+        <button class="gc-open" type="button">ひらける！</button>`;
+      priceEl.querySelector('.gc-open')?.addEventListener('click', doOpen);
     }
-    const r = await a.onPresent();
-    if (r) {
-      jump();
-      showToast(`🎁 ${r.costume === 'beret' ? 'ベレーぼう' : 'マフラー'} をゲット！（のこり ${r.coins} コイン）`, 5000);
+
+    const toggle = async (id: string) => {
+      const nowOn = !equipped.includes(id);
+      if (nowOn) equipped.push(id); else equipped.splice(equipped.indexOf(id), 1);
+      changed = true;
+      renderGrid(); syncCat();
+      try {
+        const res = await api.setCostume(id, nowOn);
+        equipped.length = 0; equipped.push(...res.equipped);
+        owned.length = 0; owned.push(...res.owned);
+      } catch (e) {
+        if (nowOn) equipped.splice(equipped.indexOf(id), 1); else equipped.push(id); // 巻き戻し
+        alert((e as Error).message);
+      }
+      renderGrid(); syncCat();
+    };
+
+    function renderGrid() {
+      gridEl.innerHTML = COSTUMES.map((c) => {
+        const has = owned.includes(c.id);
+        const eq = equipped.includes(c.id);
+        if (!has) return `<div class="gc-slot locked"><div class="gc-ico gc-sil">？</div><div class="gc-name">？？？</div></div>`;
+        return `<div class="gc-slot${eq ? ' equipped' : ''}"><div class="gc-ico">${c.emoji}</div><div class="gc-name">${esc(c.name)}</div><button class="gc-toggle" type="button" data-id="${c.id}">${eq ? 'はずす' : 'つける'}</button></div>`;
+      }).join('');
+      gridEl.querySelectorAll<HTMLElement>('.gc-toggle').forEach((b) => b.addEventListener('click', () => toggle(b.dataset.id!)));
     }
-  });
+
+    renderPrice();
+    renderGrid();
+  };
+  canvas.querySelector('#k-present')?.addEventListener('click', openPresentModal);
 
   return [wrap];
 }

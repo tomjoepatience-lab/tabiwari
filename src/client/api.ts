@@ -38,8 +38,11 @@ export type UserSettings = {
   xp: number;
   level: number;
   costume: string | null;
+  costumes: { owned: string[]; equipped: string[] }; // v2 衣装（重ね小物6種）の所持/装備
   last_summary_shown: string | null; // 月初サマリーを表示済みの月（YYYY-MM）
 };
+export type Rarity = 'normal' | 'rare' | 'super';
+export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
 export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean; deadline: string | null };
 export type Overview = {
   settings: UserSettings | null;
@@ -150,7 +153,9 @@ export const api = {
     fetch(`/api/goals/${id}/deposit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount }) })
       .then((r) => json<{ goal: SavingsGoal; reward: { xp: number; coins: number; done: boolean; level: number } }>(r)),
   openPresent: () =>
-    fetch('/api/present', { method: 'POST' }).then((r) => json<{ costume: string; coins: number }>(r)),
+    fetch('/api/present', { method: 'POST' }).then((r) => json<PresentResult>(r)),
+  setCostume: (id: string, on: boolean) =>
+    fetch('/api/costumes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, on }) }).then((r) => json<{ owned: string[]; equipped: string[] }>(r)),
   addIncome: (body: { name?: string; amount: number; on_date?: string }) =>
     fetch('/api/incomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number; name: string; amount: number; on_date: string }>(r)),
   photoUrl: (receiptId: number) => `/api/receipts/${receiptId}/photo`,

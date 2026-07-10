@@ -1146,6 +1146,41 @@ body.theme-kids .cm-title { color: #7A4A00; }
 body.theme-kids .cm-close { background: #F0E4C8; color: #A08A60; }
 .kd-form { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
 
+/* 🎁 プレゼント（衣装ガチャ）モーダル */
+.gacha { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.gc-stage { position: relative; height: 96px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.gc-burst { position: absolute; inset: 0; pointer-events: none; }
+.gc-get { position: absolute; left: 50%; bottom: 4px; transform: translate(-50%, 6px); opacity: 0; transition: opacity .25s, transform .25s;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 14px; font-weight: 800; color: #B9506E; white-space: nowrap; text-shadow: 0 1px 0 rgba(255,255,255,.7); }
+.gc-get.show { opacity: 1; transform: translate(-50%, 0); }
+.gc-rl { font-size: 12px; font-weight: 800; padding: 1px 10px; border-radius: 999px; }
+.gc-rl.gc-rare { background: #DCE7FA; color: #39628F; }
+.gc-rl.gc-super { background: linear-gradient(90deg,#FFE9A0,#F5C542); color: #8A5E0A; }
+.gc-price { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gc-cost { font-size: 13px; font-weight: 800; color: #7A5A20; }
+.gc-need { font-size: 12px; font-weight: 700; color: #B9506E; }
+.gc-complete { font-size: 15px; font-weight: 800; color: #C99B2E; text-align: center; padding: 6px 0; }
+.gc-open { border: none; cursor: pointer; font-size: 16px; font-weight: 800; color: #7A4A00;
+  padding: 10px 30px; border-radius: 999px; background: linear-gradient(180deg,#FFE9A8,#FFD54A);
+  box-shadow: 0 6px 14px rgba(150,95,10,.4); }
+.gc-open:disabled { background: #EAE2CF; color: #B4A98C; box-shadow: none; cursor: default; }
+.gc-hint { font-size: 12px; font-weight: 800; color: #A08A60; text-align: center; }
+.gc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.gc-slot { display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 9px 4px; border-radius: 14px; background: #FFFDF6; border: 2.5px solid #EAD9AE; }
+.gc-slot.equipped { border-color: #F5C542; box-shadow: 0 0 0 2px rgba(245,197,66,.4), 0 4px 10px rgba(150,100,20,.22); }
+.gc-slot.locked { background: #F1EEE6; border-color: #E0DACD; }
+.gc-ico { font-size: 26px; line-height: 1; }
+.gc-ico.gc-sil { color: #C4BCA9; filter: grayscale(1); }
+.gc-name { font-size: 10.5px; font-weight: 800; color: #6B5638; text-align: center; line-height: 1.2; }
+.gc-slot.locked .gc-name { color: #B4A98C; }
+.gc-toggle { border: none; cursor: pointer; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px;
+  background: #F0E4C8; color: #7A5A20; }
+.gc-slot.equipped .gc-toggle { background: #FFD54A; color: #7A4A00; }
+@keyframes gcshake { 0%,100%{transform:rotate(0)} 15%{transform:rotate(-7deg)} 30%{transform:rotate(6deg)} 45%{transform:rotate(-5deg)} 60%{transform:rotate(4deg)} 75%{transform:rotate(-2deg)} }
+@keyframes gcfall { 0%{transform:translateY(-10px) rotate(0);opacity:0} 12%{opacity:1} 100%{transform:translateY(150px) rotate(340deg);opacity:0} }
+
 /* 金額入力(.price)のスピナー矢印も消す（ちょきん・収入の入力欄） */
 input.price::-webkit-outer-spin-button, input.price::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input.price { -moz-appearance: textfield; appearance: textfield; }

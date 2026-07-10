@@ -133,6 +133,16 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- 既存DB向け（冪等）
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_summary_shown TEXT;
 
+-- v2 衣装システム: 重ね小物6種を複数所持・複数装備（owned/equipped は衣装IDの配列）。
+-- 旧 costume TEXT（beret/scarf）は新6種に該当なしのため owned へは移行せず残置（以後未使用）。
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS costumes JSONB NOT NULL DEFAULT '{"owned":[],"equipped":[]}';
+-- 旧 beret/scarf 所持者への補償（新衣装に置き換えできないぶん +30コイン）。
+-- 冪等: 補償後は costume を NULL にして二重付与を防ぐ（costumes 未取得＝まだ引いていない行だけが対象）。
+UPDATE user_settings
+   SET coins = coins + 30, costume = NULL
+ WHERE costume IS NOT NULL
+   AND costumes = '{"owned":[],"equipped":[]}'::jsonb;
+
 -- ちょきん目標（こども/おとな共通。ゲーム機¥25,000 など）
 CREATE TABLE IF NOT EXISTS savings_goals (
   id         SERIAL PRIMARY KEY,

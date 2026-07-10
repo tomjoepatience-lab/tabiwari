@@ -145,3 +145,91 @@ export function stageAccessoriesHtml(stage: number): { back: string; front: stri
     default: return { back: '', front: '' };
   }
 }
+
+// ---- ガチャ（プレゼント🎁）の衣装 -----------------------------------------
+// 30コインで開ける衣装ガチャの6種。ステージ装備と別レイヤーで「重ねる小物」。
+export type CostumeRarity = 'normal' | 'rare' | 'super';
+export interface CostumeDef { id: string; emoji: string; name: string; rarity: CostumeRarity }
+export const COSTUMES: CostumeDef[] = [
+  { id: 'rib',  emoji: '🎀', name: 'しっぽリボン',       rarity: 'normal' },
+  { id: 'star', emoji: '⭐', name: 'ほっぺスター',       rarity: 'normal' },
+  { id: 'bal',  emoji: '🎈', name: 'あかいふうせん',     rarity: 'normal' },
+  { id: 'bag',  emoji: '🎒', name: 'ちいさなリュック',   rarity: 'rare' },
+  { id: 'bfly', emoji: '🦋', name: 'あたまのちょうちょ', rarity: 'rare' },
+  { id: 'aura', emoji: '✨', name: 'きんのオーラ',       rarity: 'super' },
+];
+
+// 装備中(equipped)の衣装を 300×370 座標系でマネコに重ねる HTML を返す。
+// ステージ装備（帽子y0-70・首輪y188-216・マント・モノクル・王笏・ベスト・蝶ネクタイ・絆創膏）
+// と幾何的に衝突しないスロットに配置（fable確定）。各アイテムは data-costume で識別できる。
+// 呼び出し側は #k-cat / jr-cat の acc.front の後ろに差し込む（aura のみ z-index:-1 で背面）。
+export function gachaAccessoriesHtml(equipped: string[]): string {
+  const on = (id: string) => equipped.includes(id);
+  const wrap = (id: string, inner: string, extra = '') =>
+    `<div data-costume="${id}" style="position:absolute;inset:0;pointer-events:none;${extra}">${inner}</div>`;
+  let out = '';
+
+  // aura ✨（super）: 体の周囲の淡い金グロー＋キラキラ粒。猫本体より背面（z-index:-1）。
+  if (on('aura')) {
+    out += wrap('aura', `
+      <div style="position:absolute;left:38px;top:64px;width:224px;height:280px;border-radius:50%;background:radial-gradient(ellipse at 50% 45%,rgba(255,224,130,.55),rgba(255,213,74,.28) 45%,rgba(255,213,74,0) 72%);filter:blur(3px)"></div>
+      <div style="position:absolute;left:26px;top:150px;width:14px;height:14px;background:#FFF3B8;animation:msparkle 1.8s ease-in-out infinite"></div>
+      <div style="position:absolute;left:258px;top:120px;width:12px;height:12px;background:#FFF3B8;animation:msparkle 2.1s ease-in-out infinite;animation-delay:-.7s"></div>
+      <div style="position:absolute;left:52px;top:300px;width:11px;height:11px;background:#FFF3B8;animation:msparkle 2.3s ease-in-out infinite;animation-delay:-1.2s"></div>
+      <div style="position:absolute;left:240px;top:286px;width:13px;height:13px;background:#FFF3B8;animation:msparkle 1.6s ease-in-out infinite;animation-delay:-.4s"></div>
+      <div style="position:absolute;left:150px;top:34px;width:10px;height:10px;background:#FFF7C8;animation:msparkle 2s ease-in-out infinite;animation-delay:-1s"></div>`,
+      'z-index:-1');
+  }
+
+  // bag 🎒（rare）: 体の左脇の赤いリュック（ゆれ mbagbob）。
+  if (on('bag')) {
+    out += wrap('bag', `
+      <div style="position:absolute;left:46px;top:206px;width:52px;height:80px;transform-origin:62% 4px;animation:mbagbob 3s ease-in-out infinite">
+        <div style="position:absolute;left:30px;top:-42px;width:9px;height:58px;border-radius:5px;background:linear-gradient(180deg,#D93A32,#A5231C);transform:rotate(11deg);transform-origin:bottom center"></div>
+        <div style="position:absolute;left:2px;top:6px;width:44px;height:66px;border-radius:15px;background:linear-gradient(180deg,#E8483F,#B92626);box-shadow:inset -5px -6px 10px rgba(100,10,10,.4)"></div>
+        <div style="position:absolute;left:8px;top:32px;width:32px;height:26px;border-radius:9px;background:linear-gradient(180deg,#FF7A6E,#E8483F)"></div>
+        <div style="position:absolute;left:20px;top:38px;width:8px;height:13px;border-radius:4px;background:#FFD54A"></div>
+      </div>`);
+  }
+
+  // rib 🎀（normal）: しっぽの付け根（右下）のピンクのリボン。
+  if (on('rib')) {
+    out += wrap('rib', `
+      <div style="position:absolute;left:196px;top:244px;width:18px;height:18px;background:linear-gradient(135deg,#FF9AC0,#E0447E);clip-path:polygon(100% 0,100% 100%,8% 50%);border-radius:3px"></div>
+      <div style="position:absolute;left:214px;top:244px;width:18px;height:18px;background:linear-gradient(225deg,#FF9AC0,#E0447E);clip-path:polygon(0 0,0 100%,92% 50%);border-radius:3px"></div>
+      <div style="position:absolute;left:207px;top:247px;width:12px;height:12px;border-radius:4px;background:#D6316C"></div>`);
+  }
+
+  // star ⭐（normal）: 左ほっぺの上・外側の小さな金の星。
+  if (on('star')) {
+    out += wrap('star', `
+      <div style="position:absolute;left:76px;top:132px;width:20px;height:20px;background:radial-gradient(circle at 40% 30%,#FFF3B8,#FFD54A 60%,#E0A82E);clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);box-shadow:0 0 6px rgba(255,213,74,.85);animation:mfloat2 2.4s ease-in-out infinite"></div>`);
+  }
+
+  // bal 🎈（normal）: 左手の上へのびる赤い風船（ゆれ mfloat2）。
+  if (on('bal')) {
+    out += wrap('bal', `
+      <div style="animation:mfloat2 3.2s ease-in-out infinite">
+        <div style="position:absolute;left:50px;top:58px;width:2px;height:124px;background:rgba(150,90,40,.6);transform:rotate(10deg);transform-origin:top center"></div>
+        <div style="position:absolute;left:32px;top:12px;width:40px;height:48px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#FF8A7E,#E8483F 60%,#C0271F);box-shadow:inset -4px -5px 8px rgba(120,20,15,.35)"></div>
+        <div style="position:absolute;left:48px;top:57px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid #C0271F"></div>
+        <div style="position:absolute;left:40px;top:20px;width:9px;height:12px;border-radius:50%;background:rgba(255,255,255,.5)"></div>
+      </div>`);
+  }
+
+  // bfly 🦋（rare）: 頭上をふわふわ飛ぶちょうちょ（帽子より上でもOK）。
+  if (on('bfly')) {
+    out += wrap('bfly', `
+      <div style="position:absolute;left:146px;top:2px;width:46px;height:34px;animation:mfloat2 2.6s ease-in-out infinite">
+        <div style="position:absolute;left:20px;top:6px;width:4px;height:24px;border-radius:2px;background:#3A2660"></div>
+        <div style="position:absolute;left:0;top:2px;width:20px;height:15px;border-radius:60% 40% 50% 50%;background:radial-gradient(circle at 60% 40%,#8FD3EE,#4E7FB5);transform:rotate(-12deg)"></div>
+        <div style="position:absolute;left:0;top:16px;width:18px;height:13px;border-radius:50% 50% 40% 60%;background:radial-gradient(circle at 60% 40%,#F5A8C8,#E0447E);transform:rotate(10deg)"></div>
+        <div style="position:absolute;left:24px;top:2px;width:20px;height:15px;border-radius:40% 60% 50% 50%;background:radial-gradient(circle at 40% 40%,#8FD3EE,#4E7FB5);transform:rotate(12deg)"></div>
+        <div style="position:absolute;left:26px;top:16px;width:18px;height:13px;border-radius:50% 50% 60% 40%;background:radial-gradient(circle at 40% 40%,#F5A8C8,#E0447E);transform:rotate(-10deg)"></div>
+        <div style="position:absolute;left:19px;top:-1px;width:2px;height:7px;background:#3A2660;transform:rotate(-22deg)"></div>
+        <div style="position:absolute;left:24px;top:-1px;width:2px;height:7px;background:#3A2660;transform:rotate(22deg)"></div>
+      </div>`);
+  }
+
+  return out;
+}

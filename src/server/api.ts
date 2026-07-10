@@ -73,6 +73,40 @@ async function recurringAccessible(userId: number, recId: number): Promise<boole
 // weight を 1以上の整数に丸める（不正値は 1）
 const normWeight = (w: unknown) => (Number.isInteger(w) && (w as number) > 0 ? (w as number) : 1);
 
+// ---- マネコの衣装（重ね小物6種・排出率はサーバー側の真実） -----------------
+type Rarity = 'normal' | 'rare' | 'super';
+const COSTUMES: { id: string; name: string; rarity: Rarity; weight: number }[] = [
+  { id: 'rib',  name: '🎀 しっぽリボン',       rarity: 'normal', weight: 23 },
+  { id: 'star', name: '⭐ ほっぺスター',        rarity: 'normal', weight: 23 },
+  { id: 'bal',  name: '🎈 あかいふうせん',      rarity: 'normal', weight: 24 },
+  { id: 'bag',  name: '🎒 ちいさなリュック',    rarity: 'rare',   weight: 12.5 },
+  { id: 'bfly', name: '🦋 あたまのちょうちょ',  rarity: 'rare',   weight: 12.5 },
+  { id: 'aura', name: '✨ きんのオーラ',        rarity: 'super',  weight: 5 },
+];
+const isCostumeId = (id: unknown): id is string => typeof id === 'string' && COSTUMES.some((c) => c.id === id);
+
+// JSONB costumes を必ず { owned, equipped }（衣装IDのみ）に正規化する
+function normCostumes(raw: unknown): { owned: string[]; equipped: string[] } {
+  const c = (raw ?? {}) as { owned?: unknown; equipped?: unknown };
+  const owned = Array.isArray(c.owned) ? c.owned.filter(isCostumeId) : [];
+  const equipped = Array.isArray(c.equipped) ? c.equipped.filter((e) => isCostumeId(e) && owned.includes(e)) : [];
+  return { owned, equipped };
+}
+
+// 未所持のみを対象に、weight を正規化した重み付き抽選。全所持なら null。
+function drawCostume(owned: string[]): { id: string; name: string; rarity: Rarity } | null {
+  const pool = COSTUMES.filter((c) => !owned.includes(c.id));
+  if (pool.length === 0) return null;
+  const total = pool.reduce((s, c) => s + c.weight, 0);
+  let r = Math.random() * total;
+  for (const c of pool) {
+    r -= c.weight;
+    if (r < 0) return { id: c.id, name: c.name, rarity: c.rarity };
+  }
+  const last = pool[pool.length - 1]; // 端数保険（浮動小数で最後まで残った場合）
+  return { id: last.id, name: last.name, rarity: last.rarity };
+}
+
 // ---- グループ（家族の共有単位） --------------------------------------
 api.get('/groups', async (req, res) => {
   const { rows } = await pool.query(
@@ -735,7 +769,7 @@ api.get('/overview', async (req, res) => {
 
     const wallet = (s?.balance_start ?? 0) + incomeQ.rows[0].total - allSpendQ.rows[0].total - savedAll;
     res.json({
-      settings: s ? { ...s, level: levelOf(s.xp) } : null,
+      settings: s ? { ...s, level: levelOf(s.xp), costumes: normCostumes(s.costumes) } : null,
       month: { spend: monthSpendQ.rows[0].total, income: incomeQ.rows[0].month, byCategory: byCatQ.rows },
       wallet,
       goals: goalsQ.rows,
@@ -869,22 +903,60 @@ api.post('/goals/:id/deposit', async (req, res) => {
 });
 
 // プレゼント: 30コインでマネコの衣装ガチャ（こどものごほうび消費先）
+// 未所持のみから重み抽選し、owned に追加＋自動で equipped にも追加（引いたらすぐ着る）。
 api.post('/present', async (req, res) => {
   const userId = uid(req);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const sQ = await client.query(`SELECT coins, costume FROM user_settings WHERE user_id = $1 FOR UPDATE`, [userId]);
+    const sQ = await client.query(`SELECT coins, costumes FROM user_settings WHERE user_id = $1 FOR UPDATE`, [userId]);
     const s = sQ.rows[0];
     if (!s) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'さきにモードを選んでね' }); }
+    const { owned, equipped } = normCostumes(s.costumes);
+    // 全所持ならコインを引かずコンプリート応答
+    if (owned.length >= COSTUMES.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'ぜんぶあつめたよ！コンプリート！' });
+    }
     if (s.coins < 30) { await client.query('ROLLBACK'); return res.status(400).json({ error: `コインが足りないよ（30コイン必要・いま${s.coins}）` }); }
-    const options = ['beret', 'scarf'].filter((c) => c !== s.costume);
-    const costume = options[Math.floor(Math.random() * options.length)];
+    const drawn = drawCostume(owned);
+    if (!drawn) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'ぜんぶあつめたよ！コンプリート！' }); }
+    const nextOwned = [...owned, drawn.id];
+    const nextEquipped = equipped.includes(drawn.id) ? equipped : [...equipped, drawn.id];
     const uQ = await client.query(
-      `UPDATE user_settings SET coins = coins - 30, costume = $1 WHERE user_id = $2 RETURNING coins`,
-      [costume, userId]);
+      `UPDATE user_settings SET coins = coins - 30, costumes = $1 WHERE user_id = $2 RETURNING coins`,
+      [JSON.stringify({ owned: nextOwned, equipped: nextEquipped }), userId]);
     await client.query('COMMIT');
-    res.json({ costume, coins: uQ.rows[0].coins });
+    res.json({ costume: drawn.id, name: drawn.name, rarity: drawn.rarity, coins: uQ.rows[0].coins });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    serverError(res, e);
+  } finally {
+    client.release();
+  }
+});
+
+// 衣装の着せ替え: 所持している衣装の equipped を on/off する
+api.put('/costumes', async (req, res) => {
+  const userId = uid(req);
+  const { id, on } = req.body ?? {};
+  if (!isCostumeId(id)) return res.status(400).json({ error: 'その衣装は存在しないよ' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sQ = await client.query(`SELECT costumes FROM user_settings WHERE user_id = $1 FOR UPDATE`, [userId]);
+    const s = sQ.rows[0];
+    if (!s) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'さきにモードを選んでね' }); }
+    const { owned, equipped } = normCostumes(s.costumes);
+    if (!owned.includes(id)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'まだ持っていない衣装だよ' }); }
+    const nextEquipped = on === true
+      ? (equipped.includes(id) ? equipped : [...equipped, id])
+      : equipped.filter((e) => e !== id);
+    await client.query(
+      `UPDATE user_settings SET costumes = $1 WHERE user_id = $2`,
+      [JSON.stringify({ owned, equipped: nextEquipped }), userId]);
+    await client.query('COMMIT');
+    res.json({ owned, equipped: nextEquipped });
   } catch (e) {
     await client.query('ROLLBACK');
     serverError(res, e);

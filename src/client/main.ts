@@ -245,6 +245,8 @@ async function renderHome() {
               await renderHome();
             } catch (e) { alert((e as Error).message); }
           },
+          // 🎁ガチャで所持/装備が変わった → 再取得してホーム再描画（猫へ反映）
+          onCostumeChanged: () => { overviewCache = null; void renderHome(); },
         })
       : adultHome({ ...common, insights: monthlyInsights(recent, o), onReceiptChanged: () => { overviewCache = null; } });
     if (recentFailed) panels.push(el('p', { class: 'status err', textContent: '📡 通信が不安定で最近の記録を読めませんでした。再読み込みしてください。' }));
