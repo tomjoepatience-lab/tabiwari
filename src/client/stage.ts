@@ -191,7 +191,7 @@ export function stageSceneryHtml(s: number): string {
 
     <!-- 建物：STAGE1 かけだし（木のパンや）（fable裁定: top 230→292） -->
     ${bldBasic ? `
-    <div style="position:absolute;left:30px;top:292px;transform:scale(.78);transform-origin:top left">
+    <div style="position:absolute;right:12px;top:292px;transform:scale(.78);transform-origin:top right">
       <div style="position:relative;width:150px;height:130px">
         <div style="position:absolute;left:126px;bottom:0;width:18px;height:100px;background:linear-gradient(180deg,#CDAE7E,#A9895A);transform:skewY(-36deg);transform-origin:left bottom;border-radius:0 4px 0 0;box-shadow:inset -4px 0 7px rgba(110,75,30,.4)"></div>
         <div style="position:absolute;left:0;bottom:0;width:126px;height:100px;border-radius:5px 5px 0 0;background:linear-gradient(90deg,#F0DCB4 0%,#E0C089 62%,#D6B57E 100%);box-shadow:inset -8px -10px 16px rgba(140,95,40,.22)"></div>

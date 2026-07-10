@@ -970,7 +970,7 @@ body.theme-kids main, body.theme-adult main {
   /* 下パディングにソフトキーボード高さ(--kb)を足す: iOS standalone PWA では
      キーボード表示で window.innerHeight が縮まず、記録ボタンがキーボードの裏に隠れて
      スクロールしても前に出せなくなる（phone.ts が --kb を設定）。 */
-  padding: 20px 14px calc(170px + var(--kb, 0px));
+  padding: 20px 14px calc(240px + env(safe-area-inset-bottom) + var(--kb, 0px));
   display: flex; flex-direction: column; gap: 14px;
 }
 .hv { transition: transform .15s; }
@@ -1123,7 +1123,7 @@ body.theme-kids main, body.theme-adult main {
 
 /* こども: 記録ボタンが金色ナビに隠れないよう余白を大きく（iPhone のホームインジケータぶんも足す）。
    下端に十分な余白があると、保存ボタンをスクロールでナビより上へ持ってこられる。 */
-body.theme-kids .pc-scroll { padding-bottom: calc(250px + env(safe-area-inset-bottom) + var(--kb, 0px)); }
+body.theme-kids .pc-scroll { padding-bottom: calc(340px + env(safe-area-inset-bottom) + var(--kb, 0px)); }
 
 /* こども: 全タブをマネコタウンの世界観に（クリーム＋金ふち＋丸文字） */
 body.theme-kids .pc-scroll .card {

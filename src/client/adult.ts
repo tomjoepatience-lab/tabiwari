@@ -101,7 +101,7 @@ export function adultNavHtml(active: KidsTab): string {
   const c = (tab: KidsTab) => (active === tab ? '#C99B2E' : '#B8AE9C');
   const t = (tab: KidsTab) => (active === tab ? '#C99B2E' : '#8C8375');
   return `
-  <div style="position:absolute;left:0;right:0;bottom:0;height:84px;background:#FFFFFF;box-shadow:0 -6px 20px rgba(60,50,30,.08);display:flex;align-items:flex-start;justify-content:space-around;padding:12px 10px 0;z-index:20">
+  <div style="position:absolute;left:0;right:0;bottom:0;height:84px;background:#FFFFFF;box-shadow:0 -6px 20px rgba(60,50,30,.08);display:flex;align-items:flex-start;justify-content:space-around;padding:12px 10px 0;z-index:1200">
     <div data-nav="home" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
       <div style="display:flex;flex-direction:column;align-items:center">
         <div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:8px solid ${c('home')}"></div>

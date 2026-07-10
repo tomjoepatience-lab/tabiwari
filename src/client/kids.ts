@@ -54,7 +54,7 @@ export function kidsNavHtml(active: KidsTab): string {
   const lbl = (tab: KidsTab, color: string, text: string) =>
     `<span style="font-size:11px;font-weight:800;color:${color};background:${active === tab ? '#FFD54A' : 'rgba(255,253,246,.9)'};border-radius:999px;padding:1px 9px">${text}</span>`;
   return `
-  <div style="position:absolute;left:0;right:0;bottom:26px;display:flex;justify-content:center;align-items:flex-end;gap:14px;z-index:20">
+  <div style="position:absolute;left:0;right:0;bottom:26px;display:flex;justify-content:center;align-items:flex-end;gap:14px;z-index:1200">
     <div data-nav="home" class="hv" style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer">
       <div style="width:52px;height:52px;border-radius:50%;border:3.5px solid #FFFDF6;background:radial-gradient(circle at 35% 30%, #FFC94D, #F5A623);box-shadow:0 5px 12px rgba(120,80,20,.35);display:flex;flex-direction:column;align-items:center;justify-content:center">
         <div style="width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-bottom:9px solid #FFFDF6"></div>
@@ -251,7 +251,7 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     </div>
 
     <!-- せかいをみる（RPGの旅マップへ）。現在ステージ＆％も表示 -->
-    <div id="k-journey" class="hv" style="position:absolute;left:50%;top:300px;transform:translateX(-50%);z-index:9;cursor:pointer;background:linear-gradient(180deg,#FFE9A8,#FFD54A);border:2.5px solid #E8B62B;border-radius:999px;padding:7px 15px;box-shadow:0 6px 16px rgba(150,95,10,.42);display:flex;align-items:center;gap:7px;white-space:nowrap">
+    <div id="k-journey" class="hv" style="position:absolute;left:50%;top:445px;transform:translateX(-50%);z-index:9;cursor:pointer;background:linear-gradient(180deg,#FFE9A8,#FFD54A);border:2.5px solid #E8B62B;border-radius:999px;padding:7px 15px;box-shadow:0 6px 16px rgba(150,95,10,.42);display:flex;align-items:center;gap:7px;white-space:nowrap">
       <span style="font-size:15px">🗺</span>
       <span style="font-size:12.5px;font-weight:800;color:#7A4A00">せかいを みにいく</span>
       <span style="font-size:11px;font-weight:800;color:#B9506E;background:#FFF7DE;border-radius:999px;padding:1px 8px">${esc(STAGES[jStage].name)} ${jPct}%</span>
