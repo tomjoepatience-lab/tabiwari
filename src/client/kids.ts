@@ -1,7 +1,7 @@
 // こどもモード「マネコタウン」ホーム — デザイン 2a (maneko-home-game-2a.dc.html) の忠実移植。
 // マークアップ・色・寸法・アニメーションはモックのまま、数値だけ実データを注入する。
 import { api, Overview, QuickReward, RecentReceipt } from './api';
-import { yen, el, labeled, todayIso } from './ui';
+import { yen, el, labeled } from './ui';
 import { phoneCanvas, esc } from './phone';
 import { Insight } from './advice';
 import { ReactionKind } from './character';
@@ -332,24 +332,7 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     }, 500);
   }
 
-  // 🎁 おこづかいが とどいたよ トースト（親から送金 or 収入記録の最新1件）。
-  // localStorage['maneko_seen_income'] に既読id。celebrate 中は据え置き（次の描画で出す）。
-  // 初回ユーザー（キー無し）で「今日以外」の収入は鳴らさず既読にするだけ（過去分で鳴らさない）。
-  const li = o.latestIncome;
-  if (li) {
-    const KEY = 'maneko_seen_income';
-    const stored = localStorage.getItem(KEY);
-    const seen = stored == null ? -1 : Number(stored);
-    if (li.id > seen) {
-      const isToday = li.on_date === todayIso();
-      if (stored == null && !isToday) {
-        try { localStorage.setItem(KEY, String(li.id)); } catch { /* noop */ }
-      } else if (!a.celebrate) {
-        window.setTimeout(() => showToast(`🎁 ¥${li.amount.toLocaleString('ja-JP')} の ${li.name} が とどいたよ！`, 5000), 1200);
-        try { localStorage.setItem(KEY, String(li.id)); } catch { /* noop */ }
-      }
-    }
-  }
+  // おこづかい着信トーストは main.ts の全画面ポーリング機構（enqueueKidsToast）に統合した。
 
   // チャレンジ → きろくへ / もくひょう → ちょきん箱へ
   canvas.querySelector('#k-challenge')?.addEventListener('click', () => { if (!o.challengeDone) a.goTab('add'); });

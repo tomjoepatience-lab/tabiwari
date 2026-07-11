@@ -1,4 +1,4 @@
-import { api, AppMode, Group, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User } from './api';
+import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User } from './api';
 import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
@@ -40,11 +40,118 @@ type HomeTab = 'home' | 'add' | 'report' | 'savings' | 'menu';
 let homeTab: HomeTab = 'home';
 let overviewCache: Overview | null = null;
 let recentCache: RecentReceipt[] | null = null;
+let incomesCache: IncomeRow[] | null = null; // レポートのカレンダーに載せる収入一覧
 let calMonth = new Date();
 // 記録直後にマネコがお祝いするための持ち越し
 let pendingCelebrate: { kind: ReactionKind; name: string; reward?: QuickReward } | null = null;
 
 // DOM ヘルパーは ui.ts に共通化（el / yen / fmtDate / labeled / todayIso）
+
+// --- 📣 アプリ内トースト（こども向け通知・どの画面でも出る） ----------------
+// .pc-canvas の上部に重ねて表示。キューで同時1枚・6秒で自動消滅・タップで閉じる。
+const toastQueue: string[] = [];
+let toastShowing = false;
+function enqueueAppToast(text: string) {
+  toastQueue.push(text);
+  if (!toastShowing) showNextAppToast();
+}
+function showNextAppToast() {
+  const text = toastQueue.shift();
+  if (!text) { toastShowing = false; return; }
+  toastShowing = true;
+  // いま表示中の画面キャンバスに重ねる（ホーム/タブ共通）。無ければ body へ。
+  const host = document.querySelector<HTMLElement>('.pc-canvas') ?? document.body;
+  const t = el('div', { class: 'app-toast', textContent: text });
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    t.classList.add('leaving');
+    window.setTimeout(() => { t.remove(); showNextAppToast(); }, 220);
+  };
+  t.addEventListener('click', close);
+  window.setTimeout(close, 6000);
+  host.append(t);
+}
+
+// --- 🎁 こども向け着信ポーリング（おこづかいが届いたらどの画面でもトースト） ----
+// 25秒間隔＋タブ復帰時に即チェック。document.hidden 中はタイマーを止める。
+// 既読は localStorage['maneko_seen_income_<userId>']。初回（キー無し）は鳴らさず既読だけセット。
+const EVENTS_POLL_MS = 25_000;
+let eventsTimer: number | undefined;
+let eventsEnabled = false; // こどもモードでログイン中のみ true
+let eventsBusy = false;
+
+const seenIncomeKey = () => `maneko_seen_income_${currentUser?.id ?? 0}`;
+
+async function checkEvents() {
+  if (eventsBusy || !eventsEnabled || document.hidden || !currentUser) return;
+  eventsBusy = true;
+  try {
+    const ev = await api.events();
+    const li = ev.latestIncome;
+    if (!li) {
+      // 収入ゼロの子: 既読を0で初期化しておくと「はじめてのおこづかい」から鳴らせる
+      if (localStorage.getItem(seenIncomeKey()) == null) {
+        try { localStorage.setItem(seenIncomeKey(), '0'); } catch { /* noop */ }
+      }
+    } else {
+      const stored = localStorage.getItem(seenIncomeKey());
+      if (stored == null) {
+        // 初回は過去分で鳴らさない（既読idを置くだけ）
+        try { localStorage.setItem(seenIncomeKey(), String(li.id)); } catch { /* noop */ }
+      } else if (li.id > Number(stored)) {
+        try { localStorage.setItem(seenIncomeKey(), String(li.id)); } catch { /* noop */ }
+        overviewCache = null; // おさいふ残高が変わっているので取り直す
+        // ホーム/ちょきんは金額が見えている画面なのでその場で更新（入力中は壊さない）。
+        // 再描画は .pc-canvas を作り直しトーストごと消すので、描画が終わってから載せる。
+        const ae = document.activeElement;
+        const typing = ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement;
+        if ((homeTab === 'home' || homeTab === 'savings') && !typing) {
+          try { await renderHome(); } catch { /* 描画に失敗してもトーストは出す */ }
+        }
+        enqueueAppToast(`🎁 「${li.name}」¥${li.amount.toLocaleString('ja-JP')} が とどいたよ！`);
+      }
+    }
+  } catch { /* 通信エラーは次のポーリングで再試行 */ }
+  finally { eventsBusy = false; }
+}
+
+function startEventsTimer() {
+  if (eventsTimer == null) eventsTimer = window.setInterval(() => void checkEvents(), EVENTS_POLL_MS);
+}
+function stopEventsTimer() {
+  if (eventsTimer != null) { clearInterval(eventsTimer); eventsTimer = undefined; }
+}
+// renderHome のたびに呼ぶ。多重 setInterval を作らない（起動は未起動時のみ）。
+function syncEventsPolling(mode: AppMode) {
+  if (mode === 'kids') {
+    if (!eventsEnabled) {
+      eventsEnabled = true;
+      try { localStorage.removeItem('maneko_seen_income'); } catch { /* 旧・ホーム限定トーストの既読キーを掃除 */ }
+      if (!document.hidden) { startEventsTimer(); void checkEvents(); }
+    }
+  } else {
+    stopEventsPolling();
+  }
+}
+function stopEventsPolling() {
+  eventsEnabled = false;
+  stopEventsTimer();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopEventsTimer();
+  else if (eventsEnabled) { startEventsTimer(); void checkEvents(); } // 復帰時は即チェック
+});
+
+// 自己操作（収入記録・ポイント¥交換）の直後に既読idを黙って前進させ、自分へのトーストを抑止する
+async function markEventsSeen() {
+  if (!currentUser) return;
+  try {
+    const ev = await api.events();
+    if (ev.latestIncome) localStorage.setItem(seenIncomeKey(), String(ev.latestIncome.id));
+  } catch { /* 失敗しても実害は「自分の操作にもトーストが出る」だけ */ }
+}
 
 // --- ルーティング -----------------------------------------------------
 async function route() {
@@ -52,6 +159,7 @@ async function route() {
   charts.forEach((c) => c.destroy());
   charts = [];
   recentCache = null; // 画面遷移のたびに直近支出を取り直す（記録の追加を反映）
+  incomesCache = null;
   if (mapInstance) { mapInstance.remove(); mapInstance = null; }
   const m = (location.hash || '#/').match(/^#\/trip\/(\d+)/);
   try {
@@ -197,6 +305,7 @@ async function renderHome() {
   const o = overviewCache;
   if (!o.settings) { renderModePicker(); return; }
   const mode: AppMode = o.settings.mode;
+  syncEventsPolling(mode); // こどもモードなら着信ポーリング開始（おとなは停止）
   document.body.classList.toggle('theme-kids', mode === 'kids');
   document.body.classList.toggle('theme-adult', mode === 'adult');
   // アプリ自体を背景化: html/body の背景をキャンバス内と連続させ、スクロール/縮小しても
@@ -211,10 +320,16 @@ async function renderHome() {
   }
 
   // 直近支出は取れなくてもホーム自体は必ず表示する
+  // レポートタブはカレンダーに収入も載せるので、recent と並行で incomes を取得する
+  const incomesP = homeTab === 'report' && !incomesCache ? api.listIncomes().catch(() => null) : null;
   let recentFailed = false;
   if (!recentCache) {
     try { recentCache = (await api.recentExpenses(366)).receipts; }
     catch { recentFailed = true; }
+  }
+  if (incomesP) {
+    const r = await incomesP;
+    if (r) incomesCache = r.incomes; // 失敗時は収入なし表示（カレンダー自体は出す）
   }
   if (epoch !== renderEpoch) return; // ここまでの await 中に新しい描画が始まった
   const recent = recentCache ?? [];
@@ -265,9 +380,10 @@ async function renderHome() {
   } else if (homeTab === 'add') {
     panels = wrapPhone(mode, homeTab, quickAddPanel(mode));
   } else if (homeTab === 'report') {
+    const incomes = incomesCache ?? [];
     const sections = mode === 'adult'
-      ? [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent), mapPanel(recent)]
-      : [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, true)]; // こどももジャンル別（手直しなし）
+      ? [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]
+      : [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, true, incomes)]; // こどももジャンル別（手直しなし）
     panels = wrapPhone(mode, homeTab, sections);
   } else if (homeTab === 'savings') {
     panels = wrapPhone(mode, homeTab, savingsPanel(o, mode));
@@ -349,6 +465,8 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     try {
       await api.addIncome({ name: nameIn.value.trim() || undefined, amount: a });
       overviewCache = null;
+      incomesCache = null;
+      await markEventsSeen(); // 自分で記録した収入にトーストを鳴らさない
       pendingCelebrate = { kind: 'generic', name: nameIn.value.trim() || 'おこづかい' };
       homeTab = 'home';
       await renderHome();
@@ -450,6 +568,8 @@ function choreKidsCard(o: Overview): HTMLElement {
       try {
         const r = await api.exchangePoints('yen') as { yen: number };
         overviewCache = null;
+        incomesCache = null; // ¥交換は incomes に1件できる
+        await markEventsSeen(); // 自分の交換にトーストを鳴らさない
         alert(`¥${r.yen} が おさいふに はいったよ！`);
         await renderHome();
       } catch (e) { alert((e as Error).message); yenBtn.disabled = false; }
@@ -571,8 +691,9 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const logout = el('button', { class: 'link-btn', textContent: 'ログアウト' });
   logout.addEventListener('click', async () => {
     await api.logout();
+    stopEventsPolling();
     currentUser = null; myGroups = [];
-    overviewCache = null; recentCache = null;
+    overviewCache = null; recentCache = null; incomesCache = null;
     document.body.classList.remove('theme-kids', 'theme-adult');
     renderAuth();
   });
@@ -997,7 +1118,7 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
 }
 
 // --- 📅 カレンダー -------------------------------------------------------
-function calendarPanel(recent: RecentReceipt[], readonly = false): HTMLElement {
+function calendarPanel(recent: RecentReceipt[], readonly = false, incomes: IncomeRow[] = []): HTMLElement {
   const byDay = new Map<string, { total: number; rows: RecentReceipt[] }>();
   for (const r of recent) {
     const day = r.purchased_on.slice(0, 10);
@@ -1006,18 +1127,34 @@ function calendarPanel(recent: RecentReceipt[], readonly = false): HTMLElement {
     e.rows.push(r);
     byDay.set(day, e);
   }
+  // 収入（おこづかい・給料・ポイント¥交換）も日別にまとめて、支出と並べて見せる
+  const incByDay = new Map<string, IncomeRow[]>();
+  for (const inc of incomes) {
+    const day = inc.on_date.slice(0, 10);
+    const arr = incByDay.get(day) ?? [];
+    arr.push(inc);
+    incByDay.set(day, arr);
+  }
   const iso = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
   const title = el('h2');
   const grid = el('div', { class: 'cal-grid' });
   const monthTotalEl = el('div', { class: 'cal-month-total' });
 
-  // 日付タップ → カードが出てきて明細・思い出写真が見られる
+  // 日付タップ → カードが出てきて明細・思い出写真が見られる（収入も💰行で並ぶ）
   function showDay(day: string) {
     const e = byDay.get(day);
+    const incRows = (incByDay.get(day) ?? []).map((inc) =>
+      el('div', { class: 'cal-inc-row' }, [
+        el('span', { class: 'cal-inc-name', textContent: `💰 ${inc.name}` }),
+        el('strong', { class: 'cal-inc-amt', textContent: `+${yen(inc.amount)}` }),
+      ]));
+    const spendCards = e && e.rows.length
+      ? e.rows.map((r) => receiptCard(r, { readonly, onChanged: () => { overviewCache = null; } }))
+      : [];
     const content = el('div', { class: 'cal-day-cards' },
-      e && e.rows.length
-        ? e.rows.map((r) => receiptCard(r, { readonly, onChanged: () => { overviewCache = null; } }))
+      incRows.length || spendCards.length
+        ? [...incRows, ...spendCards]
         : [el('p', { class: 'muted', textContent: 'この日の記録はありません。' })]);
     canvasModal(grid, content, { title: fmtDate(day) + ' の記録' });
   }
@@ -1035,10 +1172,13 @@ function calendarPanel(recent: RecentReceipt[], readonly = false): HTMLElement {
     for (let d = 1; d <= daysInMonth; d++) {
       const day = iso(y, m, d);
       const e = byDay.get(day);
+      const hasInc = incByDay.has(day);
       if (e) monthTotal += e.total;
       const cell = el('button', { class: 'cal-cell' + (e ? ' has' : '') + (day === todayIso ? ' today' : '') }, [
         el('span', { class: 'cal-d', textContent: String(d) }),
         el('span', { class: 'cal-t', textContent: e ? yen(e.total) : '' }),
+        // 収入マーク: 支出（金額表示）と区別できる小さな緑の＋ドット
+        ...(hasInc ? [el('span', { class: 'cal-inc-dot', textContent: '＋' })] : []),
       ]);
       cell.addEventListener('click', () => showDay(day));
       cells.push(cell);

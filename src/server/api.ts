@@ -997,6 +997,30 @@ api.post('/incomes', async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// 収入の一覧（自分のぶんのみ・レポートのカレンダーに載せる）。最新300件。
+api.get('/incomes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, amount, on_date FROM incomes WHERE user_id = $1 ORDER BY on_date DESC, id DESC LIMIT 300`,
+      [uid(req)]);
+    res.json({ incomes: rows });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
+// こどもモードの軽量ポーリング用: 自分に届いた最新の収入1件だけ（親からのおこづかい着信トースト）。
+api.get('/events', async (req, res) => {
+  try {
+    const incQ = await pool.query(
+      `SELECT id, name, amount FROM incomes WHERE user_id = $1 ORDER BY on_date DESC, id DESC LIMIT 1`,
+      [uid(req)]);
+    res.json({ latestIncome: incQ.rows[0] ?? null });
+  } catch (e) {
+    serverError(res, e);
+  }
+});
+
 // ---- ワンタップ記録 -----------------------------------------------------
 // グループ・日常プロジェクト・自分メンバーが無ければ全部自動作成して、
 // 品名＋金額だけで記録できるようにする（記録までの道のりを最短に）。

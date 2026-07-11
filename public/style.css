@@ -546,6 +546,7 @@ button.big-add { font-size: 16px; padding: 13px 26px; border-radius: 999px; }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .cal-w { text-align: center; font-size: 12px; color: var(--muted); padding: 2px 0; }
 .cal-cell {
+  position: relative; /* 収入マーク(.cal-inc-dot)の基準 */
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   gap: 2px;
   min-height: 52px;
@@ -1371,3 +1372,38 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 @keyframes mpulse { 0%,100%{transform:translateX(-50%) scale(1);box-shadow:0 0 0 0 rgba(216,60,44,.5)} 50%{transform:translateX(-50%) scale(1.06);box-shadow:0 0 0 12px rgba(216,60,44,0)} }
 @keyframes mflag { 0%,100%{transform:skewY(0)} 50%{transform:skewY(-9deg)} }
 @keyframes mchev { 0%,100%{opacity:.3;transform:translateX(-50%) translateY(0)} 50%{opacity:1;transform:translateX(-50%) translateY(5px)} }
+
+/* ======================================================================
+   📣 アプリ内トースト（こども向け通知・どの画面でも .pc-canvas 上部に出る）
+   ====================================================================== */
+.app-toast {
+  position: absolute; top: 104px; left: 50%; transform: translateX(-50%);
+  z-index: 2500; /* HUD(〜15)より上・モーダル .cm-overlay(3000) より下 */
+  width: max-content; max-width: 86%;
+  background: #FFFDF6;
+  border: 2.5px solid #E8B62B;
+  border-radius: 18px;
+  padding: 10px 18px;
+  font-size: 13px; font-weight: 800; color: #7A5A20;
+  line-height: 1.5; text-align: center;
+  box-shadow: 0 8px 20px rgba(120,80,20,.32);
+  cursor: pointer;
+  animation: toast-pop .3s cubic-bezier(.34,1.56,.64,1);
+}
+.app-toast.leaving { opacity: 0; transform: translateX(-50%) translateY(-8px); transition: opacity .2s, transform .2s; }
+@keyframes toast-pop { from { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(.9); } to { opacity: 1; transform: translateX(-50%); } }
+
+/* 📅 カレンダーの収入マーク（緑の＋ドット）と日別カードの収入行 */
+.cal-inc-dot {
+  position: absolute; top: 3px; right: 3px;
+  width: 13px; height: 13px; border-radius: 999px;
+  background: #2E9E5B; color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 13px; text-align: center;
+}
+.cal-inc-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: #EAF7EE; border: 1.5px solid #BCE3C8; border-radius: 12px;
+  padding: 8px 12px;
+}
+.cal-inc-name { font-size: 13px; font-weight: 700; color: #2E2A24; }
+.cal-inc-amt { color: #1E7A43; font-size: 13px; }

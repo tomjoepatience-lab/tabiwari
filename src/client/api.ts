@@ -45,6 +45,8 @@ export type Rarity = 'normal' | 'rare' | 'super';
 export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
 export type SavingsGoal = { id: number; name: string; emoji: string | null; target: number; saved: number; done: boolean; deadline: string | null };
 export type IncomeSummary = { id: number; amount: number; name: string; on_date: string };
+export type IncomeRow = { id: number; name: string; amount: number; on_date: string };
+export type AppEvents = { latestIncome: { id: number; name: string; amount: number } | null };
 export type Overview = {
   settings: UserSettings | null;
   month: { spend: number; income: number; byCategory: { category: string; total: number }[] };
@@ -183,6 +185,8 @@ export const api = {
     fetch('/api/costumes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, on }) }).then((r) => json<{ owned: string[]; equipped: string[] }>(r)),
   addIncome: (body: { name?: string; amount: number; on_date?: string }) =>
     fetch('/api/incomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ id: number; name: string; amount: number; on_date: string }>(r)),
+  listIncomes: () => fetch('/api/incomes').then((r) => json<{ incomes: IncomeRow[] }>(r)),
+  events: () => fetch('/api/events').then((r) => json<AppEvents>(r)),
   // 親子アカウント連携
   createLinkCode: () => fetch('/api/links/code', { method: 'POST' }).then((r) => json<LinkCode>(r)),
   joinLink: (code: string) =>
