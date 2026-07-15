@@ -156,9 +156,8 @@ api.post('/groups/join', async (req, res) => {
   res.status(201).json({ ...g.rows[0], role: 'member' });
 });
 
-// ---- レシートOCR（Claude vision で明細抽出） -------------------------
-// 有料APIを呼ぶため、ユーザー単位の簡易レート制限（1分5回・1日50回）とサイズ上限を設ける
-const ocrHits = new Map<number, number[]>();
+// ---- レシートOCR（Gemini vision で明細抽出） -------------------------
+// 有料APIを呼ぶため、ユーザー単位で 1日5回 までに制限する（サーバー側で永続化・JST暦日）。
 api.post('/ocr', async (req, res) => {
   const { image } = req.body ?? {};
   if (typeof image !== 'string' || !image) {
@@ -167,15 +166,33 @@ api.post('/ocr', async (req, res) => {
   if (image.length > 8_000_000) {
     return res.status(400).json({ error: '画像が大きすぎます（縮小してから送ってください）' });
   }
-  const now = Date.now();
-  const hits = (ocrHits.get(uid(req)) ?? []).filter((t) => now - t < 86_400_000);
-  if (hits.filter((t) => now - t < 60_000).length >= 5 || hits.length >= 50) {
-    return res.status(429).json({ error: '読み取りの回数制限に達しました。少し待ってから試してください' });
-  }
-  hits.push(now);
-  ocrHits.set(uid(req), hits);
+  const userId = uid(req);
   try {
-    res.json(await extractReceipt(image));
+    // 制限チェックも try 内に置く（Neon の一時エラーで未捕捉 reject になりリクエストがハングするのを防ぐ）
+    const { rows } = await pool.query(
+      `SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date AS today,
+              (SELECT last_ocr_on FROM user_settings WHERE user_id = $1) AS last_ocr_on,
+              (SELECT ocr_used FROM user_settings WHERE user_id = $1) AS ocr_used`,
+      [userId]
+    );
+    const { today, last_ocr_on: lastOcrOn, ocr_used: ocrUsed } = rows[0];
+    const usedToday = lastOcrOn === today ? (ocrUsed ?? 0) : 0;
+    if (usedToday >= 5) {
+      return res.status(429).json({ error: 'レシートよみとりは 1日5回までだよ。またあした！' });
+    }
+    const result = await extractReceipt(image);
+    // OCR成功時のみ消費を記録する（通信エラー・プロバイダ失敗では消費しない）。
+    // 日付が変わっていれば ocr_used を 1 にリセット、同日なら +1。設定行が無くても安全（冪等）。
+    await pool.query(
+      `INSERT INTO user_settings (user_id, last_ocr_on, ocr_used)
+       VALUES ($1, (now() AT TIME ZONE 'Asia/Tokyo')::date, 1)
+       ON CONFLICT (user_id) DO UPDATE SET
+         ocr_used = CASE WHEN user_settings.last_ocr_on = (now() AT TIME ZONE 'Asia/Tokyo')::date
+                         THEN user_settings.ocr_used + 1 ELSE 1 END,
+         last_ocr_on = (now() AT TIME ZONE 'Asia/Tokyo')::date`,
+      [userId]
+    );
+    res.json(result);
   } catch (e) {
     // OCRのエラーはアプリ由来のメッセージ（APIキー未設定・読み取り失敗）なのでそのまま出す
     res.status(500).json({ error: (e as Error).message });

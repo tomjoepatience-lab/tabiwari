@@ -107,6 +107,9 @@ auth.post('/register', async (req, res) => {
     );
     await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
     await client.query('COMMIT');
+    // 登録は自動ログインを兼ねるので、初回ログインとして記録する
+    await pool.query(`UPDATE users SET last_login_at = now(), login_count = 1 WHERE id = $1`, [userId]);
+    console.log(`[auth] register: ${rows[0].username} (id ${userId})`);
     await createSession(res, userId);
     res.status(201).json({ user: rows[0] });
   } catch (e: any) {
@@ -133,6 +136,8 @@ auth.post('/login', async (req, res) => {
     if (!u || !verifyPassword(password, u.password_hash)) {
       return res.status(401).json({ error: 'ユーザー名またはパスワードが違います' });
     }
+    await pool.query(`UPDATE users SET last_login_at = now(), login_count = login_count + 1 WHERE id = $1`, [u.id]);
+    console.log(`[auth] login: ${u.username} (id ${u.id})`);
     await createSession(res, u.id);
     res.json({ user: { id: u.id, username: u.username } });
   } catch (e) {

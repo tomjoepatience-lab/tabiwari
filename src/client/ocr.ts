@@ -1,5 +1,5 @@
-// レシート画像をサーバーの /api/ocr に送り、Claude(vision) で抽出した明細を受け取る。
-// （旧: ブラウザ内 Tesseract。精度向上のためサーバー経由の Claude vision に切替）
+// レシート画像をサーバーの /api/ocr に送り、Gemini vision で抽出した明細を受け取る。
+// （旧: ブラウザ内 Tesseract。精度向上のためサーバー経由の vision API に切替）
 
 export type Draft = { name: string; price: number };
 export type OcrResult = {

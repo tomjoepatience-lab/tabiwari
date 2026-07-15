@@ -1,20 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-
-// レシート画像を Gemini（既定）または Claude(vision) に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
+// レシート画像を Gemini vision に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
 // Tesseract より日本語レシートの精度が高い。APIキーはサーバーのみが持つ。
 //
-// プロバイダ選択: GEMINI_API_KEY があれば Gemini（開発用・無料枠）、無ければ ANTHROPIC_API_KEY で Claude にフォールバック。
+// Claudeフォールバックは撤去済み・必要なら git 履歴から復元。
 
-// OCR は抽出タスクなので低コストな Haiku で十分（Opus の約1/5）。
-// 精度が足りなければ 'claude-sonnet-4-6'（中間）や 'claude-opus-4-8'（最上位）に上げる。
-const CLAUDE_MODEL = 'claude-haiku-4-5';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic();
-  return client;
-}
 
 export type Draft = { name: string; price: number };
 export type OcrResult = { store_name: string; purchased_on: string; category: string; address: string; items: Draft[] };
@@ -34,49 +23,23 @@ const USER_TEXT = [
 ].join('\n');
 
 let loggedProvider = false;
-function logProviderOnce(provider: 'gemini' | 'claude', model: string) {
+function logProviderOnce(model: string) {
   if (loggedProvider) return;
   loggedProvider = true;
-  console.log(`[ocr] provider: ${provider} (${model})`);
+  console.log(`[ocr] provider: gemini (${model})`);
 }
 
 export async function extractReceipt(dataUrl: string): Promise<OcrResult> {
   const m = dataUrl.match(/^data:image\/[a-zA-Z]+;base64,(.*)$/s);
   const data = m ? m[1] : dataUrl;
 
-  if (process.env.GEMINI_API_KEY) {
-    logProviderOnce('gemini', GEMINI_MODEL);
-    const text = await callGemini(data);
-    return normalize(parseJson(text));
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    logProviderOnce('claude', CLAUDE_MODEL);
-    const text = await callClaude(data);
-    return normalize(parseJson(text));
-  }
-
-  throw new Error('GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
-}
-
-async function callClaude(data: string): Promise<string> {
-  const res = await getClient().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 4096,
-    system: SYSTEM,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
-          { type: 'text', text: USER_TEXT },
-        ],
-      },
-    ],
-  });
-
-  const textBlock = res.content.find((b) => b.type === 'text');
-  return textBlock && 'text' in textBlock ? textBlock.text : '';
+  logProviderOnce(GEMINI_MODEL);
+  const text = await callGemini(data);
+  return normalize(parseJson(text));
 }
 
 async function callGemini(data: string): Promise<string> {

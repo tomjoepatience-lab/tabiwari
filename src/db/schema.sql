@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,           -- scrypt（salt:hash の16進）
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 既存DB向け（冪等）: アクセスの見える化（誰がいつ作った/ログインしたか。scripts/who.ts で確認）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count integer NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS user_groups (
   id          SERIAL PRIMARY KEY,
@@ -206,6 +209,10 @@ CREATE TABLE IF NOT EXISTS chore_logs (
   decided_at TIMESTAMPTZ
 );
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS chore_points INTEGER NOT NULL DEFAULT 0;
+
+-- レシートOCRは1ユーザー1日5回まで（JST暦日）。成功時のみ last_ocr_on/ocr_used を更新する。
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_ocr_on date;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_used integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_chores_link ON chores (link_id);
 CREATE INDEX IF NOT EXISTS idx_chore_logs_chore ON chore_logs (chore_id);
 
