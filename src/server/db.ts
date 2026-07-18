@@ -13,16 +13,25 @@ function needsSsl(cs?: string): boolean {
   return !/@(localhost|127\.0\.0\.1)[:/]/.test(cs);
 }
 
+// プールの最大接続数。既定は pg のデフォルト(10)を踏襲しつつ、環境変数で絞れるようにする。
+// Vercel(サーバーレス)では1関数=1プロセスがリクエスト毎に(コールドスタート時)乗り上がる構造のため、
+// 常駐サーバー(Render)と違ってインスタンス数が急に増減しやすく、各インスタンスが既定の10接続を
+// 持つと Neon 側の同時接続数上限に達しやすい。Vercel環境では Neon の「pooled」接続文字列
+// （PgBouncer経由）を使う前提の上で、さらに PG_POOL_MAX を小さめ（例: 3〜5）に設定して
+// pg 自体のプールも絞ることを推奨（docs/デプロイ.md参照）。ローカル/Renderでは未設定のままでOK。
+const poolMax = Number(process.env.PG_POOL_MAX) || 10;
+
 export const pool = new Pool(
   connectionString
     ? {
         connectionString,
+        max: poolMax,
         ssl: needsSsl(connectionString) ? { rejectUnauthorized: false } : undefined,
         // CURRENT_DATE / date_trunc を日本時間基準にそろえる（Neon/Render は既定UTCで、
         // 深夜の記録が「昨日」扱いになる月境界ズレを防ぐ）
         options: '-c timezone=Asia/Tokyo',
       }
-    : { options: '-c timezone=Asia/Tokyo' }
+    : { max: poolMax, options: '-c timezone=Asia/Tokyo' }
 );
 
 // Neon 無料枠は無通信でサスペンドし、アイドル接続が切られることがある。

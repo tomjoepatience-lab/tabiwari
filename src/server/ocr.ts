@@ -39,6 +39,9 @@ const USER_TEXT = [
 // これだけが Claude フォールバックの対象（JSON不正などの内容エラーは通常の Error のまま投げる）。
 class GeminiUnavailableError extends Error {}
 
+// ※ Vercel(サーバーレス)では関数インスタンス毎にモジュールが再ロードされるため、
+//   このログは「一度きり」ではなくインスタンスの数だけ出ることがある。ログの重複が増えるだけで
+//   実害はないため対処しない。
 let loggedProvider = false;
 function logProviderOnce(provider: 'gemini' | 'claude', model: string) {
   if (loggedProvider) return;

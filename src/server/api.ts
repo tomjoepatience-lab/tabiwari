@@ -1238,6 +1238,9 @@ api.post('/links/code', async (req, res) => {
 });
 
 // 連携（子側）。コードを入力して親と結ぶ。1ユーザー1分10回の簡易レート制限。
+// ※ メモリ上(Mapインスタンス毎)のため、Vercel等のサーバーレスでは関数インスタンスが複数
+//   立ち上がると制限がインスタンス毎にリセットされ実質弱まる。実害の小さい簡易ガードなので
+//   許容し、DB化などの対応はしない（コメントのみ追記）。
 const joinHits = new Map<number, number[]>();
 api.post('/links/join', async (req, res) => {
   const userId = uid(req);
@@ -1467,6 +1470,7 @@ api.get('/chores', async (req, res) => {
 });
 
 // 子側: お手伝い申請。同一メニューに pending が既にあれば 400。1分10回のレート制限。
+// ※ joinHits 同様メモリ上の制限。サーバーレスでは弱まるが許容（DB化はしない）。
 const claimHits = new Map<number, number[]>();
 api.post('/chores/:id/claim', async (req, res) => {
   const userId = uid(req);
