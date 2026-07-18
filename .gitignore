@@ -6,3 +6,14 @@ public/main.js.map
 *.log
 .claude/
 _*.ts
+
+# iOS (Capacitor) ビルド生成物
+ios/App/Pods/
+ios/App/build/
+ios/App/output/
+ios/DerivedData/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/capacitor-cordova-ios-plugins/
+**/xcuserdata/

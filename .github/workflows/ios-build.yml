@@ -1,0 +1,55 @@
+name: iOS Simulator Build
+
+# 手動実行のみ（push では走らせない・macOS ランナーは分単価が高いため）
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios/App
+        run: pod install
+
+      - name: Build for iOS Simulator
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Zip App.app
+        working-directory: ios/App/build/Build/Products/Debug-iphonesimulator
+        run: zip -r App.zip App.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: maneko-ios-simulator
+          path: ios/App/build/Build/Products/Debug-iphonesimulator/App.zip
+          retention-days: 14
