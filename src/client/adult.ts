@@ -158,8 +158,8 @@ export function adultHome(a: AdultHomeArgs): HTMLElement[] {
   if (a.celebrate?.reward) {
     const rw = a.celebrate.reward;
     const bits: string[] = [];
-    if (rw.challengeCleared) bits.push('きょうのチャレンジクリア +5コイン!');
-    if (rw.levelUp) bits.push(`Lv.${rw.level} にアップ! +10コイン`);
+    if (rw.challengeCleared) bits.push('きょうのチャレンジクリア!');
+    if (rw.levelUp) bits.push(`Lv.${rw.level} にアップ!`);
     if (bits.length) lines.unshift(bits.join(' '));
   }
   const chipText = a.celebrate ? `「${a.celebrate.name.slice(0, 8)}」を記録しました ✓` : lines[0];

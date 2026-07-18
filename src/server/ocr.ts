@@ -1,9 +1,22 @@
-// レシート画像を Gemini vision に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
+import Anthropic from '@anthropic-ai/sdk';
+
+// レシート画像を Gemini（プライマリ）または Claude(vision) に渡して「店名・日付・カテゴリ・明細」を構造化抽出する。
 // Tesseract より日本語レシートの精度が高い。APIキーはサーバーのみが持つ。
 //
-// Claudeフォールバックは撤去済み・必要なら git 履歴から復元。
+// プロバイダ選択: 常に Gemini を優先。フォールバックするのは
+//   ① GEMINI_API_KEY が未設定、または
+//   ② Gemini 呼び出しが 429(quota) / 5xx / ネットワーク断で失敗したとき
+// のみ。JSON不正など「内容のエラー」はフォールバックせずそのまま投げる（無駄なAPIコール防止）。
 
+// OCR は抽出タスクなので低コストな Haiku で十分（Opus の約1/5）。
+const CLAUDE_MODEL = 'claude-haiku-4-5';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+let client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!client) client = new Anthropic();
+  return client;
+}
 
 export type Draft = { name: string; price: number };
 export type OcrResult = { store_name: string; purchased_on: string; category: string; address: string; items: Draft[] };
@@ -22,11 +35,22 @@ const USER_TEXT = [
   '- address はレシートに印字された店舗の住所（都道府県〜番地）。読めなければ空文字。',
 ].join('\n');
 
+// Gemini が「呼び出し自体」に失敗した（429/quota/5xx/ネットワーク断）ことを示すエラー。
+// これだけが Claude フォールバックの対象（JSON不正などの内容エラーは通常の Error のまま投げる）。
+class GeminiUnavailableError extends Error {}
+
 let loggedProvider = false;
-function logProviderOnce(model: string) {
+function logProviderOnce(provider: 'gemini' | 'claude', model: string) {
   if (loggedProvider) return;
   loggedProvider = true;
-  console.log(`[ocr] provider: gemini (${model})`);
+  console.log(`[ocr] provider: ${provider} (${model})`);
+}
+
+let loggedFallback = false;
+function logFallbackOnce(reason: string) {
+  if (loggedFallback) return;
+  loggedFallback = true;
+  console.log(`[ocr] fallback to claude (${reason})`);
 }
 
 export async function extractReceipt(dataUrl: string): Promise<OcrResult> {
@@ -34,12 +58,47 @@ export async function extractReceipt(dataUrl: string): Promise<OcrResult> {
   const data = m ? m[1] : dataUrl;
 
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定です（.env / Render の環境変数に設定してください）');
+    }
+    logFallbackOnce('GEMINI_API_KEY 未設定');
+    logProviderOnce('claude', CLAUDE_MODEL);
+    const text = await callClaude(data);
+    return normalize(parseJson(text));
   }
 
-  logProviderOnce(GEMINI_MODEL);
-  const text = await callGemini(data);
-  return normalize(parseJson(text));
+  logProviderOnce('gemini', GEMINI_MODEL);
+  try {
+    const text = await callGemini(data);
+    return normalize(parseJson(text)); // JSON不正等の内容エラーはここで投げる→フォールバックしない
+  } catch (e) {
+    if (e instanceof GeminiUnavailableError && process.env.ANTHROPIC_API_KEY) {
+      logFallbackOnce(e.message);
+      const text = await callClaude(data);
+      return normalize(parseJson(text));
+    }
+    throw e;
+  }
+}
+
+async function callClaude(data: string): Promise<string> {
+  const res = await getClient().messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 4096,
+    system: SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
+          { type: 'text', text: USER_TEXT },
+        ],
+      },
+    ],
+  });
+
+  const textBlock = res.content.find((b) => b.type === 'text');
+  return textBlock && 'text' in textBlock ? textBlock.text : '';
 }
 
 async function callGemini(data: string): Promise<string> {
@@ -58,20 +117,27 @@ async function callGemini(data: string): Promise<string> {
     generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4096 },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (e) {
+    // ネットワーク断・タイムアウト等（呼び出し自体が失敗）→ フォールバック対象
+    throw new GeminiUnavailableError(`ネットワークエラー: ${(e as Error).message}`);
+  }
 
   const json: any = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    if (res.status === 429) {
-      throw new Error('Gemini の無料枠の上限に達しました。少し待ってからもう一度試してください');
-    }
     const detail = json?.error?.message ? `: ${json.error.message}` : '';
+    const quota = res.status === 429 || /quota|resource_exhausted/i.test(json?.error?.status ?? json?.error?.message ?? '');
+    if (quota || res.status >= 500) {
+      throw new GeminiUnavailableError(`${res.status}${detail}`);
+    }
     throw new Error(`Gemini APIエラー (${res.status})${detail}`);
   }
 

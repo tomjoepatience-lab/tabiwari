@@ -136,6 +136,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- 既存DB向け（冪等）
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_summary_shown TEXT;
 
+-- iOSアプリ化M2: 利用タイプ（家族/個人）＋初回チュートリアル既読
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS usage_type TEXT;   -- 'family' | 'personal' | NULL(未選択)
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS tutorial_done BOOLEAN NOT NULL DEFAULT false;
+
 -- v2 衣装システム: 重ね小物6種を複数所持・複数装備（owned/equipped は衣装IDの配列）。
 -- 旧 costume TEXT（beret/scarf）は新6種に該当なしのため owned へは移行せず残置（以後未使用）。
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS costumes JSONB NOT NULL DEFAULT '{"owned":[],"equipped":[]}';
@@ -210,9 +214,13 @@ CREATE TABLE IF NOT EXISTS chore_logs (
 );
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS chore_points INTEGER NOT NULL DEFAULT 0;
 
--- レシートOCRは1ユーザー1日5回まで（JST暦日）。成功時のみ last_ocr_on/ocr_used を更新する。
+-- レシートOCRは無料ユーザー1日2回・1週5回まで（JST暦日・週は月曜はじまり）。成功時のみ消費を更新する。
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_ocr_on date;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_used integer NOT NULL DEFAULT 0;
+-- fable確定仕様（2026-07-15マネタイズ）: 週次カウンタ＋プレミアム無制限フラグ
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_week_on date;               -- その週の月曜日（JST）
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_week_used integer NOT NULL DEFAULT 0;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS premium_until timestamptz;      -- NULL=無料。IAP実装(M3)がここを書く
 CREATE INDEX IF NOT EXISTS idx_chores_link ON chores (link_id);
 CREATE INDEX IF NOT EXISTS idx_chore_logs_chore ON chore_logs (chore_id);
 

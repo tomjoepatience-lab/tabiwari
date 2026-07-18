@@ -28,6 +28,7 @@ export type Analytics = {
 };
 export type TripPhoto = { id: number; receipt_id: number | null; caption: string | null; taken_on: string | null; sort_order: number };
 export type AppMode = 'kids' | 'adult';
+export type UsageType = 'family' | 'personal';
 export type UserSettings = {
   mode: AppMode;
   monthly_income: number | null;
@@ -40,6 +41,8 @@ export type UserSettings = {
   costume: string | null;
   costumes: { owned: string[]; equipped: string[] }; // v2 衣装（重ね小物6種）の所持/装備
   last_summary_shown: string | null; // 月初サマリーを表示済みの月（YYYY-MM）
+  usage_type: UsageType | null; // 利用タイプ（家族/個人）。NULL=未選択（初回に選ばせる）
+  tutorial_done: boolean;       // 初回チュートリアルの既読
 };
 export type Rarity = 'normal' | 'rare' | 'super';
 export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
@@ -171,7 +174,7 @@ export const api = {
     fetch(`/api/items/${id}/genre`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ genre }) }).then((r) => json<{ id: number; genre: string }>(r)),
   // モード・ゲーミフィケーション
   overview: () => fetch('/api/overview').then((r) => json<Overview>(r)),
-  saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string }>) =>
+  saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string; usage_type: UsageType; tutorial_done: boolean }>) =>
     fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<UserSettings>(r)),
   addGoal: (body: { name: string; emoji?: string; target: number; deadline?: string }) =>
     fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<SavingsGoal>(r)),

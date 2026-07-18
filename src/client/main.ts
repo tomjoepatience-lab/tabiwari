@@ -1,4 +1,4 @@
-import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User } from './api';
+import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User, UsageType, UserSettings } from './api';
 import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
@@ -213,13 +213,13 @@ function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLE
   return [wrap];
 }
 
-// 初回だけ: こども / おとな のモード選択
-function renderModePicker() {
+// 初回だけ: こども / おとな のモード選択（かぞく利用のときは利用タイプ選択のあとに出す）
+function renderModePicker(pendingUsageType?: UsageType) {
   // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
   document.documentElement.style.background = document.body.style.background = '';
   const pick = async (mode: AppMode) => {
     try {
-      await api.saveSettings({ mode });
+      await api.saveSettings(pendingUsageType ? { mode, usage_type: pendingUsageType } : { mode });
       overviewCache = null;
       homeTab = 'home';
       await renderHome();
@@ -242,6 +242,98 @@ function renderModePicker() {
       card('adult', '💼', 'おとなモード', '予算・つかいみち・レポートが主役。マネコは小さな応援キャラに'),
     ]),
   ]));
+}
+
+// 利用タイプ（家族/個人）選択。usage_type が未選択のユーザーは必ずここを通る。
+// existing: 既に settings 行がある（＝以前から使っている）ユーザーは既存の mode を壊さず usage_type だけ保存する。
+// 真の新規ユーザー（existing=null）だけ、かぞく選択後にモード選択（こども/おとな）へ進む。
+function renderUsagePicker(existing: UserSettings | null) {
+  document.documentElement.style.background = document.body.style.background = '';
+  const pick = async (usage: UsageType) => {
+    try {
+      if (!existing) {
+        if (usage === 'personal') {
+          await api.saveSettings({ usage_type: 'personal', mode: 'adult' });
+          overviewCache = null;
+          homeTab = 'home';
+          await renderHome();
+        } else {
+          renderModePicker('family');
+        }
+      } else {
+        await api.saveSettings({ usage_type: usage });
+        overviewCache = null;
+        homeTab = 'home';
+        await renderHome();
+      }
+    } catch (e) { alert((e as Error).message); }
+  };
+  const card = (usage: UsageType, emoji: string, title: string, desc: string) => {
+    const b = el('button', { class: 'mode-card mode-' + usage }, [
+      el('span', { class: 'mode-emoji', textContent: emoji }),
+      el('strong', { textContent: title }),
+      el('span', { class: 'mode-desc', textContent: desc }),
+    ]);
+    b.addEventListener('click', () => void pick(usage));
+    return b;
+  };
+  app().replaceChildren(el('section', { class: 'card mode-pick' }, [
+    el('h2', { textContent: '🐱 マネコをどう つかう?' }),
+    el('p', { class: 'muted', textContent: 'あとで「せってい」からいつでも切りかえられます。' }),
+    el('div', { class: 'mode-grid' }, [
+      card('family', '🏠', 'かぞくで つかう', '親子でつながって、おこづかい・お手伝い・見守りも'),
+      card('personal', '👤', 'じぶんで つかう', '自分の家計簿だけ。すぐおとなモードではじめられます'),
+    ]),
+  ]));
+}
+
+// 初回チュートリアル（利用タイプ選択の直後・1回だけ）。前へ/次へ/スキップのコーチマークカード。
+const FAMILY_TUTORIAL: { emoji: string; title: string; text: string }[] = [
+  { emoji: '🐱', title: 'ホーム', text: '買ったものにマネコが反応するよ。がんばりをそばで見てくれる相棒だよ。' },
+  { emoji: '✏️', title: 'きろく', text: '下のまん中の「きろく」ボタンから、買ったものをすぐ記録できるよ。' },
+  { emoji: '👨‍👩‍👧', title: 'かぞくとつながる', text: 'せってい→連携コードで、家族のアカウントとつながれるよ。' },
+  { emoji: '🧹', title: 'おこづかい・おてつだい', text: '親から子へおこづかいを送ったり、お手伝いポイントをやり取りできるよ。' },
+];
+const PERSONAL_TUTORIAL: { emoji: string; title: string; text: string }[] = [
+  { emoji: '🐱', title: 'ホーム', text: 'マネコが買い物に反応します。使いすぎに気づいたら、そっと教えてくれます。' },
+  { emoji: '🧾', title: 'きろく', text: 'レシートを読み取って自動入力できます（1日5回まで）。' },
+  { emoji: '📊', title: 'レポート', text: 'カレンダーや地図で、いつ・どこで使ったか振り返れます。' },
+  { emoji: '🐷', title: 'ちょきん', text: '目標を作って、貯金の進み具合を見える化できます。' },
+];
+function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement) {
+  const canvas = anchorPanel.querySelector<HTMLElement>('.pc-canvas') ?? anchorPanel;
+  const steps = usage === 'family' ? FAMILY_TUTORIAL : PERSONAL_TUTORIAL;
+  let i = 0;
+  const overlay = el('div', { class: 'tut-overlay' });
+  const card = el('div', { class: 'tut-card' });
+  const finish = () => {
+    overlay.remove();
+    void api.saveSettings({ tutorial_done: true }).catch(() => { /* 次回また出るだけ */ });
+    if (overviewCache?.settings) overviewCache.settings.tutorial_done = true;
+  };
+  const renderStep = () => {
+    const st = steps[i];
+    const dots = el('div', { class: 'tut-dots' }, steps.map((_, idx) =>
+      el('span', { class: 'tut-dot' + (idx === i ? ' active' : '') })));
+    const skip = el('button', { class: 'link-btn tut-skip', textContent: 'スキップ' });
+    const prev = el('button', { type: 'button', class: 'tut-prev', textContent: '← まえへ' });
+    const next = el('button', { type: 'button', class: 'primary tut-next', textContent: i === steps.length - 1 ? 'はじめる！' : 'つぎへ →' });
+    prev.disabled = i === 0;
+    skip.addEventListener('click', finish);
+    prev.addEventListener('click', () => { i = Math.max(0, i - 1); renderStep(); });
+    next.addEventListener('click', () => { if (i === steps.length - 1) finish(); else { i++; renderStep(); } });
+    card.replaceChildren(
+      skip,
+      dots,
+      el('div', { class: 'tut-emoji', textContent: st.emoji }),
+      el('h3', { class: 'tut-title', textContent: st.title }),
+      el('p', { class: 'tut-text', textContent: st.text }),
+      el('div', { class: 'tut-nav' }, [prev, next]),
+    );
+  };
+  renderStep();
+  overlay.append(card);
+  canvas.append(overlay);
 }
 
 // グループ管理（一覧・作成・招待コードで参加）
@@ -303,7 +395,8 @@ async function renderHome() {
   }
   if (epoch !== renderEpoch) return; // すでに新しい描画が始まっている
   const o = overviewCache;
-  if (!o.settings) { renderModePicker(); return; }
+  if (!o.settings) { renderUsagePicker(null); return; }
+  if (o.settings.usage_type == null) { renderUsagePicker(o.settings); return; } // 既存ユーザーも初回だけ利用タイプを選ばせる（mode は保持）
   const mode: AppMode = o.settings.mode;
   syncEventsPolling(mode); // こどもモードなら着信ポーリング開始（おとなは停止）
   document.body.classList.toggle('theme-kids', mode === 'kids');
@@ -346,20 +439,13 @@ async function renderHome() {
     panels = mode === 'kids'
       ? kidsHome({
           ...common,
-          onPresent: async () => {
-            try {
-              const r = await api.openPresent();
-              overviewCache = null; // 次の描画でコイン残を反映
-              return r;
-            } catch (e) { alert((e as Error).message); return null; }
-          },
-          // 🐷ちょきんばこから入金（達成したらボーナスのお知らせ）
+          // 🐷ちょきんばこから入金（達成したらボーナスのお知らせ。XPのみ表示・コインは撤去）
           onDeposit: async (goalId, amount) => {
             try {
               const r = await api.depositGoal(goalId, amount);
               overviewCache = null;
               pendingCelebrate = { kind: 'generic', name: `¥${amount.toLocaleString('ja-JP')}ちょきん` };
-              if (r.reward.done) alert('🎉 もくひょう たっせい！ ボーナス +50コイン +100XP');
+              if (r.reward.done) alert('🎉 もくひょう たっせい！ ボーナス +100XP');
               await renderHome();
             } catch (e) { alert((e as Error).message); }
           },
@@ -372,8 +458,6 @@ async function renderHome() {
               await renderHome();
             } catch (e) { alert((e as Error).message); }
           },
-          // 🎁ガチャで所持/装備が変わった → 再取得してホーム再描画（猫へ反映）
-          onCostumeChanged: () => { overviewCache = null; void renderHome(); },
         })
       : adultHome({ ...common, insights: monthlyInsights(recent, o), onReceiptChanged: () => { overviewCache = null; } });
     if (recentFailed) panels.push(el('p', { class: 'status err', textContent: '📡 通信が不安定で最近の記録を読めませんでした。再読み込みしてください。' }));
@@ -395,8 +479,13 @@ async function renderHome() {
   app().replaceChildren(...panels);
   window.scrollTo({ top: 0 });
 
-  // 月初: 先月のかんたんサマリー（おとな・その月はじめて開いたときだけ）
-  if (homeTab === 'home' && mode === 'adult') maybeShowMonthlySummary(o, recent, panels[0], recentFailed);
+  // 初回チュートリアル（利用タイプ選択の直後・ホームで1回だけ）。月初サマリーと同時に出さないよう優先。
+  if (homeTab === 'home' && !o.settings.tutorial_done) {
+    showTutorialOverlay(o.settings.usage_type ?? (mode === 'kids' ? 'family' : 'personal'), panels[0]);
+  } else if (homeTab === 'home' && mode === 'adult') {
+    // 月初: 先月のかんたんサマリー（おとな・その月はじめて開いたときだけ）
+    maybeShowMonthlySummary(o, recent, panels[0], recentFailed);
+  }
 }
 
 // 月初サマリーモーダル（表示したら settings に記録して二度出さない）
@@ -453,7 +542,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   ]));
 
   // 🧹 おてつだいポイント（親子連携）: ちょきん箱の直後。連携中 or 残高があるときだけ。
-  if (kids && (o.linkedAsChild || o.chorePoints > 0)) out.push(choreKidsCard(o));
+  if (kids && o.settings?.usage_type !== 'personal' && (o.linkedAsChild || o.chorePoints > 0)) out.push(choreKidsCard(o));
 
   // 収入（おこづかい / 給料）
   const amount = el('input', { type: 'number', class: 'price', placeholder: '金額', min: '1', value: kids && o.settings?.allowance ? String(o.settings.allowance) : '' });
@@ -500,7 +589,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
       try {
         const r = await api.depositGoal(g.id, a);
         overviewCache = null;
-        if (r.reward.done) alert(`🎉 もくひょう「${g.name}」たっせい！ ボーナス +50コイン +100XP`);
+        if (r.reward.done) alert(`🎉 もくひょう「${g.name}」たっせい！ ボーナス +100XP`);
         await renderHome();
       } catch (e) { alert((e as Error).message); }
     });
@@ -559,7 +648,7 @@ function choreKidsCard(o: Overview): HTMLElement {
   const histWrap = el('div', { class: 'chore-hist' });
   card.append(listWrap, exWrap, histWrap);
 
-  // 交換ボタン2つ（ポイントに応じて有効/無効・文言を作り直す）
+  // 交換ボタン（¥のみ。コインにかえるボタンはガチャ撤去とあわせて削除・サーバーAPIは残置）
   const drawExchange = (points: number) => {
     const yenBtn = el('button', { class: 'primary chore-ex-btn', textContent: `¥に かえる（${points}pt → ¥${points}）` });
     yenBtn.disabled = points <= 0;
@@ -574,19 +663,7 @@ function choreKidsCard(o: Overview): HTMLElement {
         await renderHome();
       } catch (e) { alert((e as Error).message); yenBtn.disabled = false; }
     });
-    const coins = Math.floor(points / 5);
-    const coinBtn = el('button', { class: 'primary chore-ex-btn', textContent: `コインに かえる（${coins}まい）` });
-    coinBtn.disabled = points < 5;
-    coinBtn.addEventListener('click', async () => {
-      coinBtn.disabled = true;
-      try {
-        const r = await api.exchangePoints('coin') as { coins: number; restPoints: number };
-        overviewCache = null;
-        alert(`コイン ${r.coins}まい ゲット！（のこり ${r.restPoints}pt）`);
-        await renderHome();
-      } catch (e) { alert((e as Error).message); coinBtn.disabled = false; }
-    });
-    exWrap.replaceChildren(yenBtn, coinBtn);
+    exWrap.replaceChildren(yenBtn);
   };
 
   // 未連携（残高だけあるケース）: 残高と交換だけ
@@ -658,8 +735,25 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     : modeBtn;
   const modeSec = el('section', { class: 'card' }, [
     el('h2', { textContent: kids ? '⚙️ メニュー' : '⚙️ せってい' }),
-    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ Lv.${s.level} ・ ${s.coins}コイン ・ いまは${kids ? 'こども' : 'おとな'}モード` }),
+    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ Lv.${s.level} ・ いまは${kids ? 'こども' : 'おとな'}モード` }),
     modeSwitch,
+  ]);
+
+  // 利用タイプ（家族⇔個人）切替。personal→family に切り替えても連携等のデータは消さない（非表示になるだけ）。
+  const isPersonal = s.usage_type === 'personal';
+  const usageBtn = el('button', { class: 'primary', textContent: isPersonal ? '🏠 かぞく利用にきりかえ' : '👤 個人利用にきりかえ' });
+  usageBtn.addEventListener('click', async () => {
+    try {
+      await api.saveSettings({ usage_type: isPersonal ? 'family' : 'personal' });
+      overviewCache = null;
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
+  });
+  const usageSec = el('section', { class: 'card' }, [
+    el('h2', { textContent: '👤 利用タイプ' }),
+    el('p', { class: 'muted', textContent: isPersonal
+      ? '今は「じぶんで つかう」設定です。' : '今は「かぞくで つかう」設定です。' }),
+    usageBtn,
   ]);
 
   // お金の設定（モードで出し分け）
@@ -699,11 +793,11 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   });
   const logoutSec = el('section', { class: 'card' }, [el('h2', { textContent: 'アカウント' }), logout]);
 
-  // 👨‍👩‍👧 かぞくと つながる（親子アカウント連携）
-  const familySec = await familyLinkCard(mode, o);
+  // 👨‍👩‍👧 かぞくと つながる（親子アカウント連携）。個人利用では非表示（データは消さない）。
+  const familySec = isPersonal ? null : await familyLinkCard(mode, o);
 
   // 1アカウント・1デバイスのシンプル構成（プロジェクト/グループ管理はUIから外した）
-  return [modeSec, familySec, moneySec, logoutSec];
+  return [modeSec, usageSec, ...(familySec ? [familySec] : []), moneySec, logoutSec];
 }
 
 // --- 👨‍👩‍👧 親子アカウント連携 --------------------------------------------

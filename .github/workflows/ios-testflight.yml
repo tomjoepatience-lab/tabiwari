@@ -1,0 +1,156 @@
+name: iOS TestFlight Deploy
+
+# 手動実行のみ。実機/App Store 配布向けの署名付きビルド＋TestFlightアップロード。
+# シミュレータ用の ios-build.yml とは concurrency グループが別なので互いに干渉しない。
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      # App Store Connect API キー（fable が事前に GitHub Secrets へ登録）
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # ビルド番号は Actions の実行回数で毎回インクリメント（MARKETING_VERSION は 1.0.0 固定）
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: リポジトリ取得
+        uses: actions/checkout@v4
+
+      - name: Node セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 依存関係インストール
+        run: npm ci
+
+      - name: Capacitor iOS プロジェクト同期
+        run: npx cap sync ios
+
+      - name: CocoaPods 依存関係インストール
+        working-directory: ios/App
+        run: pod install
+
+      - name: App Store Connect API キーを復元
+        # ASC_KEY_P8_BASE64（.p8 を base64 化した文字列）を復号し、
+        # xcodebuild / altool 双方が自動検出できる標準パス ~/private_keys/ に配置する。
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_P8_BASE64" | base64 -D -o ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: exportOptions.plist を生成
+        # teamID はシークレットから動的に埋め込むため、静的ファイルではなく実行時に生成する。
+        # method は Xcode 13+ の正式名称 app-store-connect（旧名 app-store）。
+        # destination は明示的に指定しない（=既定の "export"）。
+        # 「-exportArchive に destination=upload を渡して1ステップで直接アップロードする」方式は
+        # Xcode バージョンによって挙動が変わりやすく、かつ失敗時にローカルへ .ipa が残らない
+        # （＝アップロード失敗時に artifact として回収できない）既知の不安定さがあるため、
+        # 本ワークフローでは採用しない。代わりに「export で必ずローカルに .ipa を作る」→
+        # 「その .ipa を artifact 保存」→「別ステップで xcrun altool により明示的にアップロード」
+        # という2段階構成にして、アップロードが失敗してもビルド成果物だけは必ず回収できるようにする。
+        working-directory: ios/App
+        run: |
+          cat > exportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: アーカイブをビルド（自動署名）
+        # -allowProvisioningUpdates + API キー認証で、バンドルID登録・プロビジョニングプロファイル
+        # 発行を自動化する。初回実行時にバンドルID(com.tomjo.maneko)がApp Store Connect側に
+        # まだ無い場合はここで自動登録される想定だが、API キーのロールが Developer 未満（例: Customer
+        # Support Representative のみ等）だと "not authorized" 系のエラーで失敗するので、その場合は
+        # App Store Connect の Users and Access で API キーのロールを確認すること。
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION=1.0.0 \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive
+
+      - name: アーカイブから IPA を書き出し
+        working-directory: ios/App
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist exportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -la build/export
+
+      - name: IPA を artifact として保存
+        # 後続のアップロードが失敗しても、ここまでの署名済みビルドは必ず取り出せるようにする。
+        uses: actions/upload-artifact@v4
+        with:
+          name: maneko-ios-ipa
+          path: ios/App/build/export/*.ipa
+          retention-days: 14
+
+      - name: TestFlight へアップロード
+        id: upload
+        # xcrun altool --upload-app は Apple から「非推奨（Transporter アプリ利用を推奨）」と
+        # 案内されているが、App Store Connect API キーによる認証に対応しており、CI から完全に
+        # 非対話でアップロードできる実績のある手段のため、現時点ではこちらを採用する
+        # （Transporter アプリは GUI ツールで CI 向けではない）。
+        # よくある失敗: App Store Connect 側にアプリレコード（バンドルID com.tomjo.maneko、
+        # 名前「マネコ家計簿」）がまだ作成されていないと、ここで
+        # "Unable to find application record" 等のエラーで失敗する。その場合は事前に
+        # App Store Connect > マイApp から手動でアプリレコードを作成してから再実行すること。
+        working-directory: ios/App
+        run: |
+          IPA_PATH=$(ls build/export/*.ipa | head -n1)
+          echo "アップロード対象: $IPA_PATH"
+          xcrun altool --upload-app \
+            -f "$IPA_PATH" \
+            -t ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: アップロード失敗時のヒント
+        if: failure() && steps.upload.outcome == 'failure'
+        run: |
+          echo "TestFlight アップロードに失敗しました。よくある原因:"
+          echo "1. App Store Connect にアプリレコード（バンドルID com.tomjo.maneko）が未作成"
+          echo "2. API キー(ASC_KEY_ID/ASC_ISSUER_ID)のロール権限が不足している（App Manager 以上を推奨）"
+          echo "3. MARKETING_VERSION(1.0.0) + ビルド番号(${BUILD_NUMBER}) の組が既にアップロード済み"
+          echo "IPA 自体は maneko-ios-ipa artifact に保存済みなので、Mac があれば Transporter アプリからの手動アップロードも可能。"
+
+      - name: API キーを後片付け
+        if: always()
+        run: rm -rf ~/private_keys

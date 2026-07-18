@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "マネコ家計簿",
+    "slug": "maneko-kakeibo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.tomjo.maneko",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "レシートを読み取るために使用します",
+        "NSPhotoLibraryUsageDescription": "レシート画像や思い出写真を選ぶために使用します"
+      }
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#E8B62B",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200
+        }
+      ]
+    ]
+  }
+}

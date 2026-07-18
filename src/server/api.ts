@@ -157,7 +157,8 @@ api.post('/groups/join', async (req, res) => {
 });
 
 // ---- レシートOCR（Gemini vision で明細抽出） -------------------------
-// 有料APIを呼ぶため、ユーザー単位で 1日5回 までに制限する（サーバー側で永続化・JST暦日）。
+// 有料APIを呼ぶため、無料ユーザーは 1日2回 かつ 1週5回（月曜はじまり・JST）までに制限する。
+// premium_until が未来（IAP実装=M3が書く）のユーザーは無制限。サーバー側で永続化。
 api.post('/ocr', async (req, res) => {
   const { image } = req.body ?? {};
   if (typeof image !== 'string' || !image) {
@@ -171,25 +172,57 @@ api.post('/ocr', async (req, res) => {
     // 制限チェックも try 内に置く（Neon の一時エラーで未捕捉 reject になりリクエストがハングするのを防ぐ）
     const { rows } = await pool.query(
       `SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date AS today,
+              date_trunc('week', (now() AT TIME ZONE 'Asia/Tokyo'))::date AS this_week,
               (SELECT last_ocr_on FROM user_settings WHERE user_id = $1) AS last_ocr_on,
-              (SELECT ocr_used FROM user_settings WHERE user_id = $1) AS ocr_used`,
+              (SELECT ocr_used FROM user_settings WHERE user_id = $1) AS ocr_used,
+              (SELECT ocr_week_on FROM user_settings WHERE user_id = $1) AS ocr_week_on,
+              (SELECT ocr_week_used FROM user_settings WHERE user_id = $1) AS ocr_week_used,
+              (SELECT premium_until FROM user_settings WHERE user_id = $1) AS premium_until,
+              (SELECT mode FROM user_settings WHERE user_id = $1) AS mode`,
       [userId]
     );
-    const { today, last_ocr_on: lastOcrOn, ocr_used: ocrUsed } = rows[0];
-    const usedToday = lastOcrOn === today ? (ocrUsed ?? 0) : 0;
-    if (usedToday >= 5) {
-      return res.status(429).json({ error: 'レシートよみとりは 1日5回までだよ。またあした！' });
+    const {
+      today, this_week: thisWeek,
+      last_ocr_on: lastOcrOn, ocr_used: ocrUsed,
+      ocr_week_on: ocrWeekOn, ocr_week_used: ocrWeekUsed,
+      premium_until: premiumUntil,
+      mode,
+    } = rows[0];
+    const isKids = mode === 'kids';
+    const isPremium = !!premiumUntil && new Date(premiumUntil).getTime() > Date.now();
+    if (!isPremium) {
+      const usedToday = lastOcrOn === today ? (ocrUsed ?? 0) : 0;
+      if (usedToday >= 2) {
+        return res.status(429).json({
+          error: isKids
+            ? 'きょうの よみとりは 2回までだよ。またあした！'
+            : 'レシート読み取りは1日2回までです。また明日お試しください。',
+        });
+      }
+      const usedThisWeek = ocrWeekOn === thisWeek ? (ocrWeekUsed ?? 0) : 0;
+      if (usedThisWeek >= 5) {
+        return res.status(429).json({
+          error: isKids
+            ? 'こんしゅうの よみとりは 5回までだよ。また らいしゅう！'
+            : '今週の読み取り上限（5回）に達しました。また来週お試しください。',
+        });
+      }
     }
     const result = await extractReceipt(image);
     // OCR成功時のみ消費を記録する（通信エラー・プロバイダ失敗では消費しない）。
-    // 日付が変わっていれば ocr_used を 1 にリセット、同日なら +1。設定行が無くても安全（冪等）。
+    // 日次(last_ocr_on/ocr_used)と週次(ocr_week_on/ocr_week_used)を1つのUPSERTで原子的に更新。
+    // 日付/週が変わっていればそれぞれ 1 にリセット、変わっていなければ +1。設定行が無くても安全（冪等）。
     await pool.query(
-      `INSERT INTO user_settings (user_id, last_ocr_on, ocr_used)
-       VALUES ($1, (now() AT TIME ZONE 'Asia/Tokyo')::date, 1)
+      `INSERT INTO user_settings (user_id, last_ocr_on, ocr_used, ocr_week_on, ocr_week_used)
+       VALUES ($1, (now() AT TIME ZONE 'Asia/Tokyo')::date, 1,
+                   date_trunc('week', (now() AT TIME ZONE 'Asia/Tokyo'))::date, 1)
        ON CONFLICT (user_id) DO UPDATE SET
          ocr_used = CASE WHEN user_settings.last_ocr_on = (now() AT TIME ZONE 'Asia/Tokyo')::date
                          THEN user_settings.ocr_used + 1 ELSE 1 END,
-         last_ocr_on = (now() AT TIME ZONE 'Asia/Tokyo')::date`,
+         last_ocr_on = (now() AT TIME ZONE 'Asia/Tokyo')::date,
+         ocr_week_used = CASE WHEN user_settings.ocr_week_on = date_trunc('week', (now() AT TIME ZONE 'Asia/Tokyo'))::date
+                         THEN user_settings.ocr_week_used + 1 ELSE 1 END,
+         ocr_week_on = date_trunc('week', (now() AT TIME ZONE 'Asia/Tokyo'))::date`,
       [userId]
     );
     res.json(result);
@@ -816,9 +849,12 @@ api.get('/overview', async (req, res) => {
 // 設定の作成/部分更新（初回のモード選択もここ）
 api.put('/settings', async (req, res) => {
   const userId = uid(req);
-  const { mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown } = req.body ?? {};
+  const { mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done } = req.body ?? {};
   if (mode !== undefined && mode !== 'kids' && mode !== 'adult') {
     return res.status(400).json({ error: 'mode は kids / adult です' });
+  }
+  if (usage_type !== undefined && usage_type !== 'family' && usage_type !== 'personal') {
+    return res.status(400).json({ error: 'usage_type は family / personal です' });
   }
   const num = (v: unknown) => (v === null ? null : Number.isFinite(Number(v)) ? Math.round(Number(v)) : undefined);
   try {
@@ -836,14 +872,16 @@ api.put('/settings', async (req, res) => {
       costume: costume !== undefined ? costume : cur.costume ?? null,
       last_summary_shown: typeof last_summary_shown === 'string' && /^\d{4}-\d{2}$/.test(last_summary_shown)
         ? last_summary_shown : cur.last_summary_shown ?? null,
+      usage_type: usage_type !== undefined ? usage_type : cur.usage_type ?? null,
+      tutorial_done: tutorial_done !== undefined ? Boolean(tutorial_done) : cur.tutorial_done ?? false,
     };
     const { rows } = await pool.query(
-      `INSERT INTO user_settings (user_id, mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO user_settings (user_id, mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (user_id) DO UPDATE SET mode = $2, monthly_income = $3, monthly_budget = $4,
-         allowance = $5, balance_start = $6, costume = $7, last_summary_shown = $8
+         allowance = $5, balance_start = $6, costume = $7, last_summary_shown = $8, usage_type = $9, tutorial_done = $10
        RETURNING *`,
-      [userId, next.mode, next.monthly_income, next.monthly_budget, next.allowance, next.balance_start, next.costume, next.last_summary_shown]
+      [userId, next.mode, next.monthly_income, next.monthly_budget, next.allowance, next.balance_start, next.costume, next.last_summary_shown, next.usage_type, next.tutorial_done]
     );
     res.json({ ...rows[0], level: levelOf(rows[0].xp) });
   } catch (e) {

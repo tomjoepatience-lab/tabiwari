@@ -741,6 +741,8 @@ body.theme-kids .bnav-item.active { color: #A9750B; }
 .mode-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
 .mode-kids { border-color: #FFD54A; }
 .mode-adult { border-color: #C99B2E; }
+.mode-family { border-color: #6FB7E8; }
+.mode-personal { border-color: #C99B2E; }
 @media (max-width: 600px) { .mode-grid { grid-template-columns: 1fr; } }
 
 /* ======================= こども「マネコタウン」 ======================= */
@@ -1407,3 +1409,33 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 }
 .cal-inc-name { font-size: 13px; font-weight: 700; color: #2E2A24; }
 .cal-inc-amt { color: #1E7A43; font-size: 13px; }
+
+/* ======================================================================
+   🐾 初回チュートリアル（利用タイプ選択の直後・1回だけ）
+   ====================================================================== */
+.tut-overlay {
+  position: absolute; inset: 0; z-index: 3500; /* .cm-overlay(3000) より上・最前面 */
+  background: rgba(46,42,36,.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 18px;
+}
+.tut-card {
+  position: relative; width: 100%; max-width: 320px;
+  background: #FFFDF6; border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(46,42,36,.35);
+  padding: 22px 20px 18px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center;
+  animation: cm-pop .18s ease-out;
+}
+.tut-skip { position: absolute; top: 10px; right: 12px; font-size: 12px; padding: 4px 8px; }
+.tut-dots { display: flex; gap: 6px; margin-bottom: 4px; }
+.tut-dot { width: 7px; height: 7px; border-radius: 999px; background: #E4DCC8; }
+.tut-dot.active { background: #E8B62B; }
+.tut-emoji { font-size: 42px; line-height: 1; margin-top: 6px; }
+.tut-title { font-size: 16px; font-weight: 800; color: #2E2A24; margin: 2px 0 0; }
+.tut-text { font-size: 13px; color: #5C544A; line-height: 1.6; margin: 0; }
+.tut-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; width: 100%; }
+.tut-prev { background: none; border: none; color: #8C8375; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.tut-prev:disabled { visibility: hidden; }
+.tut-next { flex: 1; max-width: 160px; }
