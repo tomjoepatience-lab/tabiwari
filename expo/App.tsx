@@ -13,8 +13,8 @@ import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTyp
 
 // マネコ家計簿の本体は Render 上の既存Webアプリ（cookieセッション認証込み）。
 // このExpoアプリは全画面WebViewでそれを表示するだけの「殻」。
-const HOME_URL = 'https://tabiwari-dacx.onrender.com';
-const HOME_HOST = 'tabiwari-dacx.onrender.com';
+const HOME_URL = 'https://tabiwari-mu.vercel.app';
+const HOME_HOST = 'tabiwari-mu.vercel.app';
 
 export default function App() {
   const webViewRef = useRef<WebView>(null);

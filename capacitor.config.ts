@@ -10,7 +10,7 @@ const config: CapacitorConfig = {
   appName: 'マネコ家計簿',
   webDir: 'www',
   server: {
-    url: 'https://tabiwari-dacx.onrender.com',
+    url: 'https://tabiwari-mu.vercel.app',
     cleartext: false,
   },
   ios: {
