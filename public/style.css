@@ -1167,7 +1167,9 @@ body.theme-kids main#app, body.theme-adult main#app {
 .gr-chip { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 3px 8px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gr-bar { height: 8px; border-radius: 999px; background: #F0EBE0; overflow: hidden; }
 .gr-fill { height: 100%; border-radius: 999px; }
+.gr-value { min-width: 0; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
 .gr-amount { text-align: right; font-size: 12.5px; font-weight: 800; color: #2E2A24; }
+.gr-percent { color: #8C8375; font-size: 10px; font-weight: 800; }
 
 /* 買い物マップ */
 .report-map { height: 300px; border-radius: 14px; overflow: hidden; }
@@ -1878,12 +1880,12 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .journey-v3-canvas {
   position: relative;
-  width: min(100%,460px);
+  width: min(100%,47.3684dvh,460px);
   height: 100dvh;
   min-height: 720px;
   margin: 0 auto;
   overflow: hidden;
-  background: url("/assets/kids/journey-3d.webp") center / cover no-repeat;
+  background: url("/assets/kids/journey-3d.webp") center / 100% 100% no-repeat;
   color: #fff;
 }
 .journey-v3-canvas::after {
@@ -2005,8 +2007,8 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 .journey-v3-marker {
   position: absolute;
   z-index: 9;
-  width: 88px;
-  transform: translate(-50%,-50%);
+  width: 78px;
+  transform: translate(-50%,-100%);
   transition: left .7s ease,top .7s ease;
   filter: drop-shadow(0 8px 9px rgba(22,15,8,.42));
 }
@@ -2023,7 +2025,7 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   font-weight: 900;
   white-space: nowrap;
 }
-.journey-v3-marker img { display: block; width: 100%; height: 115px; object-fit: contain; object-position: bottom; }
+.journey-v3-marker img { display: block; width: 100%; height: 102px; object-fit: contain; object-position: bottom; }
 .journey-v3-footer {
   position: absolute;
   left: 12px;
@@ -2348,6 +2350,23 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   background: transparent !important;
   box-shadow: none !important;
 }
+.kids-genre-control {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.kids-photo-genre-select { flex: 1; }
+.kids-auto-badge {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #e9f3df;
+  color: #668047;
+  font-size: 7px;
+  font-weight: 900;
+}
 .kids-photo-chevron { margin-left: 2px; font-size: 18px; color: #9a784f; }
 .kids-record-mode-switch {
   align-self: center;
@@ -2543,6 +2562,47 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   gap: 7px;
 }
 .kids-report-record-button .kids-line-icon { width: 18px; height: 18px; }
+.kids-photo-content-card > .card {
+  margin: 0;
+  padding: 13px;
+  border: 1px solid #ead7b5;
+  border-radius: 16px;
+  background: rgba(255,250,239,.88);
+  box-shadow: 0 3px 9px rgba(92,59,20,.08);
+}
+.kids-photo-content-card > .card h2 {
+  color: #654322;
+  font-size: 12px;
+}
+.kids-photo-content-card .gr-row {
+  grid-template-columns: 74px minmax(42px,1fr) 64px;
+  gap: 6px;
+}
+.kids-photo-content-card .gr-chip { padding-inline: 5px; font-size: 9px; }
+.kids-photo-content-card .gr-amount { font-size: 9px; }
+.kids-photo-content-card .gr-percent { font-size: 8px; }
+.kids-photo-content-card .chart-box.wide { height: 190px; }
+.kids-photo-content-card .cal-head {
+  display: grid;
+  grid-template-columns: 32px minmax(0,1fr) 32px;
+  gap: 6px;
+}
+.kids-photo-content-card .cal-head h2 { text-align: center; }
+.kids-photo-content-card .cal-head .spacer { display: none; }
+.kids-photo-content-card .cal-month-total {
+  grid-column: 1 / -1;
+  text-align: right;
+  font-size: 10px;
+}
+.kids-photo-content-card .cal-nav { padding: 3px; }
+.kids-photo-content-card .cal-grid { gap: 2px; }
+.kids-photo-content-card .cal-cell {
+  min-width: 0;
+  min-height: 46px;
+  padding: 3px 1px;
+}
+.kids-photo-content-card .cal-d { font-size: 9px; }
+.kids-photo-content-card .cal-t { font-size: 6.5px; }
 
 /* Family screen */
 .kids-family-connection { display: grid; grid-template-columns: 1fr 100px 1fr; align-items: center; margin: -3px 10px 0; }
@@ -2756,5 +2816,5 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .journey-v3-stage.current { color: #9a5d07; border-color: #f2c66f; }
 .journey-v3-stage.future { opacity: .76; }
-.journey-v3-marker { width: 102px; }
-.journey-v3-marker img { height: 130px; }
+.journey-v3-marker { width: 82px; }
+.journey-v3-marker img { height: 106px; }

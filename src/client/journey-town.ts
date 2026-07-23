@@ -7,12 +7,28 @@ function orderedGoals(overview: Overview): SavingsGoal[] {
   return [...byId.filter((goal) => !goal.done), ...byId.filter((goal) => goal.done)];
 }
 
-const points = [
-  { x: 34, y: 82 },
-  { x: 43, y: 68 },
-  { x: 33, y: 54 },
-  { x: 44, y: 40 },
-  { x: 35, y: 26 },
+const stageY = [82, 68, 54, 40, 26];
+// ルート右端に近い第3地点だけカードを左へ逃がし、マネコと重ならないようにする。
+const stageX = [66, 66, 4, 66, 66];
+
+// journey-3d.webp の石畳の中心線。5地点を直線で結ぶとカーブを横切るため、
+// 道の曲がりごとに通過点を置き、足元が常に石畳の上を進むようにする。
+const routePoints = [
+  { x: 57, y: 82 },
+  { x: 58, y: 78 },
+  { x: 56, y: 74 },
+  { x: 57, y: 70 },
+  { x: 60, y: 66 },
+  { x: 61, y: 62 },
+  { x: 60, y: 58 },
+  { x: 63, y: 54 },
+  { x: 61, y: 50 },
+  { x: 57, y: 46 },
+  { x: 53, y: 42 },
+  { x: 49, y: 38 },
+  { x: 46, y: 34 },
+  { x: 49, y: 30 },
+  { x: 50, y: 26 },
 ];
 
 function goalIcon(emoji?: string | null): string {
@@ -26,10 +42,21 @@ function goalIcon(emoji?: string | null): string {
 }
 
 function markerPoint(percent: number): { x: number; y: number } {
-  const segment = Math.min(3, Math.floor(percent / 25));
-  const progress = percent >= 100 ? 1 : (percent - segment * 25) / 25;
-  const from = points[segment];
-  const to = points[segment + 1];
+  const bounded = Math.max(0, Math.min(100, percent));
+  const distances = routePoints.slice(1).map((point, index) => {
+    const previous = routePoints[index];
+    return Math.hypot(point.x - previous.x, point.y - previous.y);
+  });
+  const totalDistance = distances.reduce((sum, distance) => sum + distance, 0);
+  let remaining = totalDistance * (bounded / 100);
+  let segment = 0;
+  while (segment < distances.length - 1 && remaining > distances[segment]) {
+    remaining -= distances[segment];
+    segment += 1;
+  }
+  const from = routePoints[segment];
+  const to = routePoints[segment + 1] ?? from;
+  const progress = distances[segment] ? remaining / distances[segment] : 0;
   return {
     x: from.x + (to.x - from.x) * progress,
     y: from.y + (to.y - from.y) * progress,
@@ -92,7 +119,7 @@ export function journeyView(overview: Overview, goalId?: number): HTMLElement {
 
         ${STAGES.map((item, index) => `
           <div class="journey-v3-stage ${index < stage ? 'done' : index === stage ? 'current' : 'future'}"
-               style="left:63%;top:${points[index].y}%">
+               style="left:${stageX[index]}%;top:${stageY[index]}%">
             <span>${index < stage ? '✓' : index + 1}</span>
             <strong>${esc(item.name)}</strong>
             <img src="/assets/kids/maneko-stage-${index}.webp" alt="">
