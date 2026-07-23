@@ -8,12 +8,22 @@ function orderedGoals(overview: Overview): SavingsGoal[] {
 }
 
 const points = [
-  { x: 54, y: 84 },
-  { x: 48, y: 68 },
-  { x: 57, y: 50 },
-  { x: 45, y: 34 },
-  { x: 53, y: 18 },
+  { x: 34, y: 82 },
+  { x: 43, y: 68 },
+  { x: 33, y: 54 },
+  { x: 44, y: 40 },
+  { x: 35, y: 26 },
 ];
+
+function goalIcon(emoji?: string | null): string {
+  const key =
+    emoji === '🎮' ? 'game' :
+    emoji === '📱' ? 'phone' :
+    emoji === '👟' ? 'shoes' :
+    emoji === '✈️' || emoji === '🧳' ? 'travel' :
+    'bike';
+  return `/assets/kids/goal-${key}.webp`;
+}
 
 function markerPoint(percent: number): { x: number; y: number } {
   const segment = Math.min(3, Math.floor(percent / 25));
@@ -59,7 +69,7 @@ export function journeyView(overview: Overview, goalId?: number): HTMLElement {
     const remaining = Math.max(0, stageAt(nextStage, target) - saved);
     const point = markerPoint(percent);
     const goalName = selected
-      ? `${esc(selected.emoji ?? '⭐')} ${esc(selected.name)}`
+      ? esc(selected.name)
       : '最初の目標';
 
     overlay.innerHTML = `
@@ -75,6 +85,7 @@ export function journeyView(overview: Overview, goalId?: number): HTMLElement {
 
         <div class="journey-v3-goal">
           ${goals.length > 1 ? '<button type="button" data-step="-1" aria-label="前の目標">‹</button>' : ''}
+          <img src="${goalIcon(selected?.emoji)}" alt="">
           <span><strong>${goalName}</strong><small>${saved.toLocaleString('ja-JP')}円 / ${target.toLocaleString('ja-JP')}円</small></span>
           ${goals.length > 1 ? '<button type="button" data-step="1" aria-label="次の目標">›</button>' : ''}
         </div>

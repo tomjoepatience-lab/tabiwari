@@ -6,7 +6,7 @@ import { openAlbum } from './album';
 import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
-import { kidsHome, kidsNavHtml, kidsPhotoShell, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
+import { goalIconPath, kidsHome, kidsNavHtml, kidsPhotoShell, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
 import { closeJourney, featuredGoal, currentStage, STAGES } from './journey';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { stageBackdrop } from './stage';
@@ -357,9 +357,9 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   let selected: SavingsGoal | null = featuredGoal(o);
   let depositAmount = 500;
   const goalSelect = el('select', { class: 'kids-photo-goal-select' },
-    o.goals.map((goal) => el('option', { value: String(goal.id), textContent: `${goal.emoji ?? '⭐'} ${goal.name}` })));
+    o.goals.map((goal) => el('option', { value: String(goal.id), textContent: goal.name })));
   if (selected) goalSelect.value = String(selected.id);
-  const emoji = el('span', { class: 'kids-photo-goal-emoji', textContent: selected?.emoji ?? '⭐' });
+  const goalIcon = el('img', { class: 'kids-photo-goal-emoji', src: goalIconPath(selected?.emoji), alt: '' });
   const name = el('strong', { class: 'kids-photo-goal-name', textContent: selected?.name ?? '最初の目標' });
   const numbers = el('div', { class: 'kids-photo-goal-numbers' });
   const percent = el('b', { class: 'kids-photo-goal-percent' });
@@ -368,7 +368,7 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   const updateGoal = () => {
     selected = o.goals.find((goal) => String(goal.id) === goalSelect.value) ?? selected;
     const pct = selected ? Math.min(100, Math.floor(selected.saved / Math.max(1, selected.target) * 100)) : 0;
-    emoji.textContent = selected?.emoji ?? '⭐';
+    goalIcon.src = goalIconPath(selected?.emoji);
     name.textContent = selected?.name ?? '最初の目標';
     numbers.textContent = selected ? `${yen(selected.saved)} / ${yen(selected.target)}` : '目標を作成してください';
     percent.textContent = `${pct}%`;
@@ -420,13 +420,31 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
 
   const newName = el('input', { placeholder: '目標の名前' });
   const newTarget = el('input', { type: 'number', inputMode: 'numeric', placeholder: '目標金額', min: '1' });
+  const iconOptions = [
+    { emoji: '🚲', key: 'bike', label: '自転車' },
+    { emoji: '🎮', key: 'game', label: 'ゲーム' },
+    { emoji: '📱', key: 'phone', label: 'スマホ' },
+    { emoji: '👟', key: 'shoes', label: '靴' },
+    { emoji: '✈️', key: 'travel', label: '旅行' },
+  ];
+  let selectedEmoji = iconOptions[0].emoji;
+  const iconPicker = el('div', { class: 'kids-goal-icon-picker' });
+  const drawIconPicker = () => iconPicker.replaceChildren(...iconOptions.map((option) => {
+    const button = el('button', { type: 'button', class: 'kids-goal-icon-option' + (selectedEmoji === option.emoji ? ' active' : ''), 'aria-label': option.label } as any, [
+      el('img', { src: `/assets/kids/goal-${option.key}.webp`, alt: '' }),
+      el('span', { textContent: option.label }),
+    ]);
+    button.addEventListener('click', () => { selectedEmoji = option.emoji; drawIconPicker(); });
+    return button;
+  }));
+  drawIconPicker();
   const create = el('button', { type: 'button', class: 'kids-photo-secondary', textContent: '目標を追加' });
   create.addEventListener('click', async () => {
     const target = Math.round(Number(newTarget.value));
     if (!newName.value.trim() || !Number.isFinite(target) || target <= 0) return alert('目標名と金額を入力してください');
     create.disabled = true;
     try {
-      await api.addGoal({ name: newName.value.trim(), emoji: '⭐', target });
+      await api.addGoal({ name: newName.value.trim(), emoji: selectedEmoji, target });
       overviewCache = null;
       await renderHome();
     } catch (error) {
@@ -439,7 +457,7 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
     el('h1', { class: 'kids-photo-title', textContent: '目標貯金' }),
     ...(o.goals.length > 1 ? [goalSelect] : []),
     el('div', { class: 'kids-photo-goal-card' }, [
-      emoji,
+      goalIcon,
       el('div', { class: 'kids-photo-goal-main' }, [
         name,
         numbers,
@@ -456,7 +474,13 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
     ]),
     el('details', { class: 'kids-photo-manage' }, [
       el('summary', { textContent: '目標を変更・追加' }),
-      el('div', { class: 'kids-photo-manage-body' }, [newName, newTarget, create]),
+      el('div', { class: 'kids-photo-manage-body' }, [
+        el('span', { class: 'kids-goal-icon-label', textContent: '目標アイコン' }),
+        iconPicker,
+        newName,
+        newTarget,
+        create,
+      ]),
     ]),
   ];
   updateGoal();
@@ -829,7 +853,9 @@ async function renderHome() {
   {
     const fg = featuredGoal(o);
     const bg = mode === 'kids'
-      ? stageBackdrop(fg ? currentStage(fg.saved, fg.target) : 0)
+      ? (homeTab === 'home'
+          ? stageBackdrop(fg ? currentStage(fg.saved, fg.target) : 0)
+          : '#F8EEDA')
       : '#F7F4EE';
     document.documentElement.style.background = document.body.style.background = bg;
   }

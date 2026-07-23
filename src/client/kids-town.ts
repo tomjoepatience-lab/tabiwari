@@ -7,6 +7,16 @@ import { openJourney } from './journey-town';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
+export function goalIconPath(emoji?: string | null): string {
+  const key =
+    emoji === '🎮' ? 'game' :
+    emoji === '📱' ? 'phone' :
+    emoji === '👟' ? 'shoes' :
+    emoji === '✈️' || emoji === '🧳' ? 'travel' :
+    'bike';
+  return `/assets/kids/goal-${key}.webp`;
+}
+
 export interface KidsHomeArgs {
   overview: Overview;
   recent: RecentReceipt[];
@@ -27,13 +37,6 @@ export function stopKidsSpeech() {
   hideTimer = undefined;
 }
 
-const navIcon = (tab: KidsTab) => {
-  if (tab === 'home') return '🏘️';
-  if (tab === 'add') return '✏️';
-  if (tab === 'savings') return '🌱';
-  return '👪';
-};
-
 export function kidsNavHtml(active: KidsTab, family = true): string {
   const items: Array<[KidsTab, string]> = [
     ['home', '街'],
@@ -44,7 +47,7 @@ export function kidsNavHtml(active: KidsTab, family = true): string {
   return `<nav class="kids-nav-v3" aria-label="メインメニュー">
     ${items.map(([tab, label]) => `
       <button type="button" data-nav="${tab}" class="kids-nav-v3-item${active === tab ? ' active' : ''}">
-        <span class="kids-nav-v3-icon" aria-hidden="true">${tab === 'menu' && !family ? '⚙️' : navIcon(tab)}</span>
+        <img class="kids-nav-v3-icon" src="/assets/kids/nav-${tab === 'home' ? 'town' : tab === 'add' ? 'record' : tab === 'savings' ? 'savings' : family ? 'family' : 'settings'}.webp" alt="" aria-hidden="true">
         <span>${label}</span>
       </button>`).join('')}
   </nav>`;
@@ -83,9 +86,13 @@ export function kidsPhotoShell(options: {
       </section>
       ${kidsNavHtml(options.active, options.family)}
     </main>`;
-  const { wrap, canvas } = phoneCanvas(html, { bg: '#f7edd9', fillHeight: true });
+  const { wrap, canvas, refit } = phoneCanvas(html, { bg: '#f7edd9', fillHeight: true });
   canvas.querySelector<HTMLElement>('.kids-photo-scroll')!.append(...options.body);
   wireNav(canvas, options.goTab);
+  // 中身を追加した後に実画面高へ合わせる。これが無いとiPhoneでスクロール領域と
+  // 下部ナビが840px基準のまま残り、目標入力やタブ下端が画面外へ落ちる。
+  refit();
+  requestAnimationFrame(refit);
   return [wrap];
 }
 
@@ -122,7 +129,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
   const walkFromScale = (1 - previousStageProgress * .14).toFixed(3);
   const walkToScale = (1 - stageProgress * .14).toFixed(3);
   const goalLabel = goal
-    ? `${esc(goal.emoji ?? '⭐')} ${esc(goal.name)}`
+    ? esc(goal.name)
     : '最初の目標を作ろう';
   const goalAmounts = goal
     ? `${goal.saved.toLocaleString('ja-JP')}円 / ${goal.target.toLocaleString('ja-JP')}円`
@@ -131,7 +138,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
   const moving = percent > previousPercent;
   const html = `
     <main class="kids-home-v3 stage-${stage}" style="--walk-from-y:${walkFromY}px;--walk-to-y:${walkToY}px;--walk-from-scale:${walkFromScale};--walk-to-scale:${walkToScale}">
-      <div class="kids-home-v3-bg" style="background-image:url('/assets/kids/stage-${stage}.webp')" aria-hidden="true"></div>
+      <div class="kids-home-v3-bg" style="background-image:url('/assets/kids/home-stage-${stage}.webp')" aria-hidden="true"></div>
       <div class="kids-home-v3-shade" aria-hidden="true"></div>
 
       <header class="kids-home-v3-header">
@@ -144,6 +151,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
       </button>
 
       <button type="button" id="k-goal" class="kids-goal-strip">
+        <img class="kids-goal-icon" src="${goalIconPath(goal?.emoji)}" alt="">
         <span class="kids-goal-strip-top">
           <strong>${goalLabel}</strong><b>${percent}%</b>
         </span>
