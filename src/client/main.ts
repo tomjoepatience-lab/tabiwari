@@ -1,4 +1,4 @@
-import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, Trip, TripDetail, User, UsageType, UserSettings } from './api';
+import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, SavingsGoal, Trip, TripDetail, User, UsageType, UserSettings } from './api';
 import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
@@ -6,7 +6,7 @@ import { openAlbum } from './album';
 import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
-import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
+import { kidsHome, kidsNavHtml, kidsPhotoShell, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
 import { closeJourney, featuredGoal, currentStage, STAGES } from './journey';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { stageBackdrop } from './stage';
@@ -217,6 +217,379 @@ function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLE
   wireNav(canvas, (t) => { homeTab = t as HomeTab; void renderHome(); });
   refit(); // .pc-scroll を append した後で高さを確定させる
   return [wrap];
+}
+
+function kidsRecordPhoto(o: Overview): HTMLElement[] {
+  const categories = ['食費', '交通', '買い物', 'その他'];
+  const icons: Record<string, string> = { 食費: '🍴', 交通: '▣', 買い物: '🛍', その他: '••' };
+  let category = categories[0];
+  let ocrItems: { name: string; price: number }[] = [];
+  let storeName = '';
+  let location: { lat: number | null; lng: number | null; name: string | null } = { lat: null, lng: null, name: null };
+
+  const amount = el('input', { class: 'kids-photo-amount', type: 'number', inputMode: 'numeric', value: '', placeholder: '0', min: '1' });
+  const date = el('input', { type: 'date', value: todayIso(), class: 'kids-photo-native-input' });
+  const categoryRow = el('div', { class: 'kids-photo-categories' });
+  const drawCategories = () => categoryRow.replaceChildren(...categories.map((name) => {
+    const button = el('button', { type: 'button', class: 'kids-photo-category' + (name === category ? ' active' : '') }, [
+      el('span', { textContent: icons[name] }),
+      el('strong', { textContent: name }),
+    ]);
+    button.addEventListener('click', () => { category = name; drawCategories(); });
+    return button;
+  }));
+  drawCategories();
+
+  const receiptInput = el('input', { type: 'file', accept: 'image/*' });
+  receiptInput.style.display = 'none';
+  const receiptButton = el('button', { type: 'button', class: 'kids-photo-wide-row' }, [
+    el('span', { class: 'kids-photo-row-icon', textContent: '📷' }),
+    el('strong', { textContent: 'レシートを読み取る' }),
+  ]);
+  const receiptStatus = el('p', { class: 'kids-photo-detected' });
+  receiptButton.addEventListener('click', () => receiptInput.click());
+  receiptInput.addEventListener('change', async () => {
+    const file = receiptInput.files?.[0];
+    receiptInput.value = '';
+    if (!file) return;
+    receiptButton.setAttribute('disabled', 'true');
+    receiptButton.querySelector('strong')!.textContent = '読み取り中…';
+    try {
+      const result = await runOcr(await resizeImage(file, 1280, .8));
+      if (!result.items.length) throw new Error('明細を読み取れませんでした');
+      ocrItems = result.items;
+      amount.value = String(result.items.reduce((sum, item) => sum + item.price, 0));
+      if (result.purchased_on) date.value = result.purchased_on;
+      storeName = result.store_name || '';
+      if (result.address || result.store_name) {
+        location = { lat: null, lng: null, name: result.address || result.store_name };
+        receiptStatus.textContent = `✓ 場所を検出: ${location.name}`;
+        receiptStatus.classList.add('show');
+      } else {
+        receiptStatus.textContent = `${result.items.length}件を読み取りました`;
+        receiptStatus.classList.add('show');
+      }
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      receiptButton.removeAttribute('disabled');
+      receiptButton.querySelector('strong')!.textContent = 'レシートを読み取る';
+    }
+  });
+
+  const placeValue = el('span', { class: 'kids-photo-row-value', textContent: '未設定' });
+  const placeRow = el('button', { type: 'button', class: 'kids-photo-info-row' }, [
+    el('span', { class: 'kids-photo-row-icon', textContent: '●' }),
+    el('strong', { textContent: '場所' }),
+    placeValue,
+    el('span', { class: 'kids-photo-chevron', textContent: '›' }),
+  ]);
+  placeRow.addEventListener('click', async () => {
+    const result = await openMapPicker(location.lat != null && location.lng != null ? { lat: location.lat, lng: location.lng } : null);
+    if (!result) return;
+    location = { lat: result.lat, lng: result.lng, name: result.name };
+    placeValue.textContent = result.name || '地図で設定済み';
+    receiptStatus.textContent = `✓ 場所を設定: ${placeValue.textContent}`;
+    receiptStatus.classList.add('show');
+  });
+
+  const groupSelect = el('select', { class: 'kids-photo-native-input' },
+    myGroups.map((group) => el('option', { value: String(group.id), textContent: group.name })));
+  if (activeGroupId) groupSelect.value = String(activeGroupId);
+
+  const save = el('button', { type: 'button', class: 'kids-photo-primary', textContent: '保存する' });
+  save.addEventListener('click', async () => {
+    const total = Math.round(Number(amount.value));
+    if (!Number.isFinite(total) || total <= 0) return alert('金額を入力してください');
+    save.disabled = true;
+    const scannedTotal = ocrItems.reduce((sum, item) => sum + item.price, 0);
+    const items = ocrItems.length && scannedTotal === total
+      ? ocrItems
+      : [{ name: storeName || category, price: total }];
+    try {
+      const result = await api.quickExpense({
+        group_id: Number(groupSelect.value) || activeGroupId || undefined,
+        store_name: storeName || location.name || undefined,
+        category,
+        purchased_on: date.value || todayIso(),
+        items,
+        lat: location.lat,
+        lng: location.lng,
+        place_name: location.name,
+      });
+      pendingCelebrate = { kind: 'generic', name: items[0].name, reward: result.reward };
+      recentCache = null;
+      overviewCache = null;
+      homeTab = 'home';
+      await renderHome();
+    } catch (error) {
+      save.disabled = false;
+      alert((error as Error).message);
+    }
+  });
+
+  const body = [
+    el('h1', { class: 'kids-photo-title', textContent: '支出を記録' }),
+    el('div', { class: 'kids-photo-price' }, [el('span', { textContent: '¥' }), amount]),
+    categoryRow,
+    receiptButton,
+    receiptInput,
+    receiptStatus,
+    el('div', { class: 'kids-photo-info-box' }, [
+      el('label', { class: 'kids-photo-info-row' }, [
+        el('span', { class: 'kids-photo-row-icon', textContent: '▦' }),
+        el('strong', { textContent: '日付' }),
+        date,
+      ]),
+      placeRow,
+      ...(myGroups.length > 1 ? [el('label', { class: 'kids-photo-info-row' }, [
+        el('span', { class: 'kids-photo-row-icon', textContent: '⌂' }),
+        el('strong', { textContent: '保存先' }),
+        groupSelect,
+      ])] : []),
+    ]),
+    save,
+  ];
+  return kidsPhotoShell({ active: 'add', family: o.settings?.usage_type !== 'personal', scene: 'record', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
+}
+
+function kidsSavingsPhoto(o: Overview): HTMLElement[] {
+  let selected: SavingsGoal | null = featuredGoal(o);
+  let depositAmount = 500;
+  const goalSelect = el('select', { class: 'kids-photo-goal-select' },
+    o.goals.map((goal) => el('option', { value: String(goal.id), textContent: `${goal.emoji ?? '⭐'} ${goal.name}` })));
+  if (selected) goalSelect.value = String(selected.id);
+  const emoji = el('span', { class: 'kids-photo-goal-emoji', textContent: selected?.emoji ?? '⭐' });
+  const name = el('strong', { class: 'kids-photo-goal-name', textContent: selected?.name ?? '最初の目標' });
+  const numbers = el('div', { class: 'kids-photo-goal-numbers' });
+  const percent = el('b', { class: 'kids-photo-goal-percent' });
+  const fill = el('i');
+  const nextText = el('span');
+  const updateGoal = () => {
+    selected = o.goals.find((goal) => String(goal.id) === goalSelect.value) ?? selected;
+    const pct = selected ? Math.min(100, Math.floor(selected.saved / Math.max(1, selected.target) * 100)) : 0;
+    emoji.textContent = selected?.emoji ?? '⭐';
+    name.textContent = selected?.name ?? '最初の目標';
+    numbers.textContent = selected ? `${yen(selected.saved)} / ${yen(selected.target)}` : '目標を作成してください';
+    percent.textContent = `${pct}%`;
+    fill.style.width = `${pct}%`;
+    const stage = selected ? currentStage(selected.saved, selected.target) : 0;
+    const next = Math.min(4, stage + 1);
+    const nextPct = next * 25;
+    nextText.textContent = pct >= 100 ? '夢の街に到着しました' : `あと${Math.max(0, nextPct - pct)}%で ${STAGES[next].name}`;
+  };
+  goalSelect.addEventListener('change', updateGoal);
+
+  const customAmount = el('input', { type: 'number', inputMode: 'numeric', placeholder: '金額入力', min: '1' });
+  const quick = el('div', { class: 'kids-photo-quick-amounts' });
+  const setQuick = (amount: number) => {
+    depositAmount = amount;
+    customAmount.value = '';
+    quick.querySelectorAll('button').forEach((button) => button.classList.toggle('active', button.textContent === `¥${amount.toLocaleString('ja-JP')}`));
+  };
+  [500, 1000].forEach((value) => {
+    const button = el('button', { type: 'button', textContent: `¥${value.toLocaleString('ja-JP')}` });
+    button.addEventListener('click', () => setQuick(value));
+    quick.append(button);
+  });
+  customAmount.addEventListener('input', () => {
+    depositAmount = Math.round(Number(customAmount.value));
+    quick.querySelectorAll('button').forEach((button) => button.classList.remove('active'));
+  });
+  quick.append(customAmount);
+  setQuick(500);
+
+  const deposit = el('button', { type: 'button', class: 'kids-photo-primary', textContent: '貯金する' });
+  deposit.addEventListener('click', async () => {
+    if (!selected) return alert('先に目標を作成してください');
+    if (!Number.isFinite(depositAmount) || depositAmount <= 0) return alert('金額を入力してください');
+    if (depositAmount > o.wallet && !confirm('お財布の残高より多い金額です。このまま貯金しますか？')) return;
+    deposit.disabled = true;
+    try {
+      const result = await api.depositGoal(selected.id, depositAmount);
+      overviewCache = null;
+      pendingCelebrate = { kind: 'generic', name: `${depositAmount.toLocaleString('ja-JP')}円を貯金` };
+      if (result.reward.done) alert(`🎉 目標「${selected.name}」を達成しました！`);
+      homeTab = 'home';
+      await renderHome();
+    } catch (error) {
+      deposit.disabled = false;
+      alert((error as Error).message);
+    }
+  });
+
+  const newName = el('input', { placeholder: '目標の名前' });
+  const newTarget = el('input', { type: 'number', inputMode: 'numeric', placeholder: '目標金額', min: '1' });
+  const create = el('button', { type: 'button', class: 'kids-photo-secondary', textContent: '目標を追加' });
+  create.addEventListener('click', async () => {
+    const target = Math.round(Number(newTarget.value));
+    if (!newName.value.trim() || !Number.isFinite(target) || target <= 0) return alert('目標名と金額を入力してください');
+    create.disabled = true;
+    try {
+      await api.addGoal({ name: newName.value.trim(), emoji: '⭐', target });
+      overviewCache = null;
+      await renderHome();
+    } catch (error) {
+      create.disabled = false;
+      alert((error as Error).message);
+    }
+  });
+
+  const body = [
+    el('h1', { class: 'kids-photo-title', textContent: '目標貯金' }),
+    ...(o.goals.length > 1 ? [goalSelect] : []),
+    el('div', { class: 'kids-photo-goal-card' }, [
+      emoji,
+      el('div', { class: 'kids-photo-goal-main' }, [
+        name,
+        numbers,
+        percent,
+        el('div', { class: 'kids-photo-progress' }, [fill]),
+      ]),
+    ]),
+    quick,
+    deposit,
+    el('button', { type: 'button', class: 'kids-photo-next-row' }, [
+      el('span', { textContent: '🗺️' }),
+      nextText,
+      el('b', { textContent: '›' }),
+    ]),
+    el('details', { class: 'kids-photo-manage' }, [
+      el('summary', { textContent: '目標を変更・追加' }),
+      el('div', { class: 'kids-photo-manage-body' }, [newName, newTarget, create]),
+    ]),
+  ];
+  updateGoal();
+  return kidsPhotoShell({ active: 'savings', family: o.settings?.usage_type !== 'personal', scene: 'savings', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
+}
+
+async function kidsFamilyPhoto(o: Overview): Promise<HTMLElement[]> {
+  const links = await api.getLinks().catch(() => null);
+  const parentName = links?.asChild?.username;
+  const childNames = links?.asParent.map((child) => child.username) ?? [];
+  const connectedName = parentName ?? childNames[0] ?? '家族';
+  const connection = el('div', { class: 'kids-family-connection' }, [
+    el('div', { class: 'kids-family-person' }, [
+      el('img', { src: '/assets/kids/maneko-stage-1.webp', alt: '' }),
+      el('strong', { textContent: '自分' }),
+    ]),
+    el('div', { class: 'kids-family-heart' }, [
+      el('span', { textContent: '···' }),
+      el('b', { textContent: '♥' }),
+      el('span', { textContent: '···' }),
+    ]),
+    el('div', { class: 'kids-family-person' }, [
+      el('img', { src: '/assets/kids/maneko-family.webp', alt: '' }),
+      el('strong', { textContent: connectedName }),
+    ]),
+  ]);
+
+  const allowance = o.latestIncome?.amount ?? o.settings?.allowance ?? 0;
+  const allowanceCard = el('section', { class: 'kids-family-block' }, [
+    el('div', { class: 'kids-family-block-title' }, [el('span', { textContent: '🐷' }), el('strong', { textContent: 'おこづかい' })]),
+    el('div', { class: 'kids-family-money-row' }, [
+      el('span', { textContent: o.latestIncome ? `${o.latestIncome.name}をもらいました` : '設定中のおこづかい' }),
+      el('strong', { textContent: allowance ? `+${yen(allowance)}` : '未設定' }),
+      el('b', { textContent: '›' }),
+    ]),
+  ]);
+
+  const choreRows = el('div', { class: 'kids-family-chore-list' });
+  if (o.linkedAsChild) {
+    const chores = await api.myChores().catch(() => null);
+    const items = chores?.chores.slice(0, 3) ?? [];
+    if (items.length) {
+      choreRows.append(...items.map((chore, index) => {
+        const icons = ['🍽️', '🧺', '🧹'];
+        const button = el('button', { type: 'button', class: 'kids-family-chore' + (chore.pending ? ' pending' : '') }, [
+          el('span', { class: 'kids-family-chore-icon', textContent: icons[index % icons.length] }),
+          el('strong', { textContent: chore.name }),
+          el('b', { textContent: chore.pending ? '確認待ち' : `+${chore.points}pt` }),
+          el('i', { textContent: '›' }),
+        ]);
+        button.disabled = chore.pending;
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await api.claimChore(chore.id);
+            button.classList.add('pending');
+            button.querySelector('b')!.textContent = '確認待ち';
+          } catch (error) {
+            button.disabled = false;
+            alert((error as Error).message);
+          }
+        });
+        return button;
+      }));
+    } else {
+      choreRows.append(el('p', { class: 'kids-photo-empty', textContent: '現在のお手伝いはありません' }));
+    }
+  } else {
+    choreRows.append(el('p', { class: 'kids-photo-empty', textContent: '家族と連携するとお手伝いが表示されます' }));
+  }
+  const choresCard = el('section', { class: 'kids-family-block' }, [
+    el('div', { class: 'kids-family-block-title', textContent: 'お手伝い' }),
+    choreRows,
+  ]);
+
+  const original = await settingsPanel(o, 'kids');
+  const manage = el('details', { class: 'kids-photo-manage kids-family-manage' }, [
+    el('summary', { textContent: '家族の連携・設定' }),
+    el('div', { class: 'kids-photo-manage-body' }, original.slice(1)),
+  ]);
+  const body = [
+    el('h1', { class: 'kids-photo-title', textContent: '家族' }),
+    connection,
+    allowanceCard,
+    choresCard,
+    el('button', { type: 'button', class: 'kids-photo-history-row' }, [
+      el('span', { textContent: '▣' }),
+      el('strong', { textContent: '家族との履歴' }),
+      el('b', { textContent: '›' }),
+    ]),
+    manage,
+  ];
+  return kidsPhotoShell({ active: 'menu', family: true, scene: 'family', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
+}
+
+async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
+  const sections = await settingsPanel(o, 'kids');
+  const details = el('details', { class: 'kids-photo-settings-details' }, [
+    el('summary', { textContent: '設定内容を開く' }),
+    el('div', { class: 'kids-photo-settings-body' }, sections),
+  ]);
+  const menuItems: Array<[string, string]> = [
+    ['♙', 'プロフィール'],
+    ['♧', '通知'],
+    ['▣', '表示'],
+    ['♧', '家族と連携'],
+    ['♢', 'アカウント'],
+  ];
+  const menu = el('div', { class: 'kids-photo-settings-menu' }, menuItems.map(([icon, label]) => {
+    const button = el('button', { type: 'button' }, [
+      el('span', { textContent: icon }),
+      el('strong', { textContent: label }),
+      el('b', { textContent: '›' }),
+    ]);
+    button.addEventListener('click', () => {
+      details.open = true;
+      requestAnimationFrame(() => details.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    });
+    return button;
+  }));
+  const body = [
+    el('h1', { class: 'kids-photo-title', textContent: '設定' }),
+    menu,
+    el('div', { class: 'kids-photo-legal' }, [
+      el('a', { href: '/privacy.html', target: '_blank', textContent: 'プライバシー' }),
+      el('span', { textContent: '|' }),
+      el('a', { href: '/terms.html', target: '_blank', textContent: '利用規約' }),
+      el('span', { textContent: '|' }),
+      el('a', { href: '/support.html', target: '_blank', textContent: 'サポート' }),
+    ]),
+    details,
+  ];
+  return kidsPhotoShell({ active: 'menu', family: false, scene: 'settings', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
 }
 
 // 初回だけ: こども / おとな のモード選択（かぞく利用のときは利用タイプ選択のあとに出す）
@@ -511,7 +884,7 @@ async function renderHome() {
       : adultHome({ ...common, insights: monthlyInsights(recent, o), onReceiptChanged: () => { overviewCache = null; } });
     if (recentFailed) panels.push(el('p', { class: 'status err', textContent: '📡 通信が不安定で最近の記録を読めませんでした。再読み込みしてください。' }));
   } else if (homeTab === 'add') {
-    panels = wrapPhone(mode, homeTab, quickAddPanel(mode));
+    panels = mode === 'kids' ? kidsRecordPhoto(o) : wrapPhone(mode, homeTab, quickAddPanel(mode));
   } else if (homeTab === 'report') {
     const incomes = incomesCache ?? [];
     const sections = mode === 'adult'
@@ -519,14 +892,18 @@ async function renderHome() {
       : [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, true, incomes)]; // こどももジャンル別（手直しなし）
     panels = wrapPhone(mode, homeTab, sections);
   } else if (homeTab === 'savings') {
-    panels = wrapPhone(mode, homeTab, savingsPanel(o, mode));
+    panels = mode === 'kids' ? kidsSavingsPhoto(o) : wrapPhone(mode, homeTab, savingsPanel(o, mode));
   } else {
-    panels = wrapPhone(mode, homeTab, await settingsPanel(o, mode));
+    panels = mode === 'kids'
+      ? (o.settings?.usage_type === 'personal' ? await kidsSettingsPhoto(o) : await kidsFamilyPhoto(o))
+      : wrapPhone(mode, homeTab, await settingsPanel(o, mode));
   }
 
   if (epoch !== renderEpoch) return; // 古い描画は捨てる（settingsPanel の await 対策）
   app().replaceChildren(...panels);
-  const switcher = spaceSwitcher(mode);
+  // マネコタウンは承認済みモックの固定レイアウトを優先する。
+  // 保存先は記録画面内で選べるため、全画面共通の上部ピルは大人モードだけに表示する。
+  const switcher = mode === 'adult' ? spaceSwitcher(mode) : null;
   const canvas = panels[0]?.querySelector<HTMLElement>('.pc-canvas') ?? panels[0];
   if (switcher && canvas) canvas.append(switcher);
   window.scrollTo({ top: 0 });

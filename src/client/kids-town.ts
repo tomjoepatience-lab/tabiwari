@@ -56,6 +56,39 @@ export function wireNav(canvas: HTMLElement, goTab: (tab: KidsTab) => void) {
   });
 }
 
+export type KidsPhotoScene = 'record' | 'savings' | 'family' | 'settings';
+
+export function kidsPhotoShell(options: {
+  active: KidsTab;
+  family: boolean;
+  scene: KidsPhotoScene;
+  body: HTMLElement[];
+  goTab(tab: KidsTab): void;
+}): HTMLElement[] {
+  const pose: Record<KidsPhotoScene, string> = {
+    record: 'receipt',
+    savings: 'walking',
+    family: 'family',
+    settings: 'settings',
+  };
+  const html = `
+    <main class="kids-photo-page kids-photo-${options.scene}">
+      <div class="kids-photo-scene" aria-hidden="true">
+        <div class="kids-photo-scene-bg"></div>
+        <div class="kids-photo-scene-shade"></div>
+        <img class="kids-photo-scene-maneko" src="/assets/kids/maneko-${pose[options.scene]}.webp" alt="">
+      </div>
+      <section class="kids-photo-sheet">
+        <div class="kids-photo-scroll"></div>
+      </section>
+      ${kidsNavHtml(options.active, options.family)}
+    </main>`;
+  const { wrap, canvas } = phoneCanvas(html, { bg: '#f7edd9', fillHeight: true });
+  canvas.querySelector<HTMLElement>('.kids-photo-scroll')!.append(...options.body);
+  wireNav(canvas, options.goTab);
+  return [wrap];
+}
+
 function localStageProgress(percent: number, stage: number): number {
   if (stage >= STAGES.length - 1) return 1;
   return Math.max(0, Math.min(1, (percent - stage * 25) / 25));
@@ -103,12 +136,12 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
 
       <header class="kids-home-v3-header">
         <button type="button" id="k-wallet" class="kids-wallet-chip" aria-label="現在の残高。貯金画面を開く">
-          <span>お財布</span><strong>${overview.wallet.toLocaleString('ja-JP')}円</strong>
-        </button>
-        <button type="button" id="k-journey" class="kids-map-chip">
-          <span aria-hidden="true">🗺️</span><span>世界を見る</span>
+          <span>残高</span><strong>¥${overview.wallet.toLocaleString('ja-JP')}</strong>
         </button>
       </header>
+      <button type="button" id="k-journey" class="kids-map-chip" aria-label="世界を見る">
+        <span aria-hidden="true">🗺️</span>
+      </button>
 
       <button type="button" id="k-goal" class="kids-goal-strip">
         <span class="kids-goal-strip-top">
@@ -129,13 +162,8 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
         <span id="k-bubble-text"></span>
       </div>
 
-      <div class="kids-place-label">
-        <span>STAGE ${stage + 1}</span>
-        <strong>${esc(STAGES[stage].name)}</strong>
-      </div>
-
       <button type="button" id="k-record" class="kids-record-fab">
-        <span aria-hidden="true">＋</span> 支出を記録
+        <span aria-hidden="true">✎</span><strong>記録</strong>
       </button>
       <div id="k-toast" class="kids-toast-v3" aria-live="polite"></div>
       ${kidsNavHtml('home', isFamily)}

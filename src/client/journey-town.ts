@@ -8,11 +8,11 @@ function orderedGoals(overview: Overview): SavingsGoal[] {
 }
 
 const points = [
-  { x: 54, y: 86 },
+  { x: 54, y: 84 },
   { x: 48, y: 68 },
-  { x: 57, y: 49 },
-  { x: 45, y: 31 },
-  { x: 53, y: 14 },
+  { x: 57, y: 50 },
+  { x: 45, y: 34 },
+  { x: 53, y: 18 },
 ];
 
 function markerPoint(percent: number): { x: number; y: number } {
@@ -81,14 +81,15 @@ export function journeyView(overview: Overview, goalId?: number): HTMLElement {
 
         ${STAGES.map((item, index) => `
           <div class="journey-v3-stage ${index < stage ? 'done' : index === stage ? 'current' : 'future'}"
-               style="left:${points[index].x < 50 ? 5 : 62}%;top:${points[index].y}%">
+               style="left:63%;top:${points[index].y}%">
             <span>${index < stage ? '✓' : index + 1}</span>
             <strong>${esc(item.name)}</strong>
+            <img src="/assets/kids/maneko-stage-${index}.webp" alt="">
           </div>`).join('')}
 
         <div class="journey-v3-marker" style="left:${point.x}%;top:${point.y}%">
           <span>いまここ</span>
-          <img src="/assets/kids/maneko-stage-${stage}.webp" alt="現在地のマネコ">
+          <img src="/assets/kids/maneko-walking.webp" alt="現在地のマネコ">
         </div>
 
         <footer class="journey-v3-footer">
