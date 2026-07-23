@@ -1,14 +1,14 @@
 // マネコ家計簿 Service Worker
 // 目的: ①ホーム画面追加(PWA)を満たす ②静的アセットをキャッシュしてオフラインでも起動する。
 // 家計データは API 経由なので /api/ はキャッシュしない（常に最新・オフライン時は素直に失敗）。
-const CACHE = 'maneko-v27';
+const CACHE = 'maneko-v28';
 
 // アプリの外殻（起動に最低限必要なもの）。?v は index.html と揃える。
 const CORE = [
   '/',
   '/index.html',
-  '/style.css?v=27',
-  '/main.js?v=27',
+  '/style.css?v=28',
+  '/main.js?v=28',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

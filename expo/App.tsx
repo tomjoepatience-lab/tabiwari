@@ -232,7 +232,7 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
       <WebView
         ref={webViewRef}
         source={{ uri: webUri }}
@@ -240,6 +240,10 @@ export default function App() {
         // Web側が env(safe-area-inset-*) でセーフエリアを扱っているため、
         // ネイティブ側では二重に余白を足さない（'never' が既定値だが明示しておく）。
         contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets={false}
+        contentInset={{ top: 0, right: 0, bottom: 0, left: 0 }}
+        bounces={false}
+        overScrollMode="never"
         allowsBackForwardNavigationGestures
         sharedCookiesEnabled
         onMessage={handleWebMessage}
@@ -373,10 +377,11 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#d8ebf1',
   },
   webview: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   loadingOverlay: {
     alignItems: 'center',

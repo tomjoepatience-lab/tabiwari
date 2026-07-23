@@ -55,14 +55,12 @@ export function phoneCanvas(
       // 高さは visualViewport ではなく layout viewport を使う:
       //   ソフトキーボード表示で visualViewport が縮むとキャンバスが跳ねるため。
       //   下限クランプもしない（横向き等 vh<キャンバスで body 二重スクロールに戻るのを防ぐ）。
-      // 実機FB対応: innerHeight−8 固定だと、iPhone では main の padding
-      // （env(safe-area-inset-top/bottom)≒59+34px）のぶんキャンバスが画面下へはみ出し、
-      // ナビと保存ボタンが折り返しの下に沈んで「保存ボタンがナビに重なり上に出せない」状態に
-      // なっていた。safe-area を差し引いた 100dvh ベースの calc にする（env()=0 の環境では
-      // 従来の innerHeight−8 と同値）。px 指定はcalc/dvh未対応環境向けフォールバック。
+      // 3D風景そのものを画面の台紙にするため、キャンバスはSafe Areaを含む
+      // layout viewport全体を覆う。ノッチとホームインジケータは各HUD/ナビ側の
+      // env(safe-area-inset-*) で避ける。ここで差し引くと上下に生成りの帯が露出する。
       canvas.style.transform = 'none';
-      const px = `${Math.round(window.innerHeight - 8)}px`;
-      const h = 'calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 8px)';
+      const px = `${Math.round(window.innerHeight)}px`;
+      const h = '100dvh';
       canvas.style.height = px;
       canvas.style.height = h;
       wrap.style.height = px;

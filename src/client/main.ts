@@ -1031,9 +1031,7 @@ async function renderHome() {
   {
     const fg = featuredGoal(o);
     const bg = mode === 'kids'
-      ? (homeTab === 'home'
-          ? stageBackdrop(fg ? currentStage(fg.saved, fg.target) : 0)
-          : '#F8EEDA')
+      ? stageBackdrop(fg ? currentStage(fg.saved, fg.target) : 0)
       : '#F7F4EE';
     document.documentElement.style.background = document.body.style.background = bg;
   }

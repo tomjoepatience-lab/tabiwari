@@ -88,7 +88,7 @@ export function kidsPhotoShell(options: {
       </section>
       ${kidsNavHtml(options.active, options.family)}
     </main>`;
-  const { wrap, canvas, refit } = phoneCanvas(html, { bg: '#f7edd9', fillHeight: true });
+  const { wrap, canvas, refit } = phoneCanvas(html, { bg: '#d8ebf1', fillHeight: true });
   const content = document.createElement('div');
   content.className = 'kids-photo-content-card';
   content.append(...options.body);
