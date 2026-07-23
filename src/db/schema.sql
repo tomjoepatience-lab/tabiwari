@@ -161,7 +161,7 @@ ALTER TABLE trip_photos ADD COLUMN IF NOT EXISTS receipt_id INTEGER REFERENCES r
 -- モード付きユーザー設定＋ゲーミフィケーション（こども=kids / おとな=adult） ----
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  mode           TEXT NOT NULL DEFAULT 'adult',   -- 'kids' | 'adult'
+  mode           TEXT NOT NULL DEFAULT 'kids',    -- マネコタウンUIへ統一
   monthly_income INTEGER,                          -- おとな: 月収（表示用）
   monthly_budget INTEGER,                          -- おとな: 月予算
   allowance      INTEGER,                          -- こども: 月のおこづかい額
@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 -- 既存DB向け（冪等）
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_summary_shown TEXT;
+ALTER TABLE user_settings ALTER COLUMN mode SET DEFAULT 'kids';
+UPDATE user_settings SET mode = 'kids' WHERE mode <> 'kids';
 
 -- iOSアプリ化M2: 利用タイプ（家族/個人）＋初回チュートリアル既読
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS usage_type TEXT;   -- 'family' | 'personal' | NULL(未選択)

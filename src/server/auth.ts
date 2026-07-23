@@ -120,6 +120,54 @@ auth.post('/register', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // メール必須化より前のユーザーは username だけを持っている。
+    // 同じ表示名・同じパスワードなら別アカウントを作らず、旧データを持つ
+    // 既存ユーザーへメールを安全に紐づける。
+    const legacyQ = await client.query(
+      `SELECT id, username, password_hash
+         FROM users
+        WHERE email IS NULL AND username = $1
+        LIMIT 1
+        FOR UPDATE`,
+      [displayName],
+    );
+    const legacy = legacyQ.rows[0];
+    if (legacy && verifyPassword(password, legacy.password_hash)) {
+      const { rows } = await client.query(
+        `UPDATE users
+            SET email = $1,
+                display_name = $2,
+                password_hash = $3,
+                last_login_at = now(),
+                login_count = login_count + 1
+          WHERE id = $4
+        RETURNING id, email, display_name, display_name AS username`,
+        [normalizedEmail, displayName, hashPassword(password), legacy.id],
+      );
+      await client.query(
+        `INSERT INTO user_settings (user_id, mode)
+         VALUES ($1, 'kids')
+         ON CONFLICT (user_id) DO UPDATE SET mode = 'kids'`,
+        [legacy.id],
+      );
+      await client.query('COMMIT');
+      console.log(`[auth] legacy account claimed: ${normalizedEmail} (id ${legacy.id})`);
+      await createSession(res, legacy.id);
+      const verifyToken = await issueAuthToken(legacy.id, 'verify_email', '24 hours');
+      const verificationSent = await sendAuthEmail(normalizedEmail, displayName, 'verify_email', verifyToken)
+        .catch((error) => {
+          console.error('[email] verification send failed:', error);
+          return false;
+        });
+      return res.status(201).json({ user: { ...rows[0], email_verified: false }, verificationSent });
+    }
+    if (legacy) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: '同じ名前の旧アカウントがあります。以前の利用者は旧パスワードを入力してください。別の方は表示名を少し変えて登録してください',
+      });
+    }
+
     // username列は旧版互換の内部IDとして残す。画面表示にはdisplay_nameだけを使う。
     const internalUsername = `u_${crypto.randomBytes(12).toString('hex')}`;
     const { rows } = await client.query(
@@ -136,6 +184,10 @@ auth.post('/register', async (req, res) => {
       [`${displayName}の家計簿`, code]
     );
     await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
+    await client.query(
+      `INSERT INTO user_settings (user_id, mode, active_group_id) VALUES ($1, 'kids', $2)`,
+      [userId, g.rows[0].id],
+    );
     await client.query('COMMIT');
     // 登録は自動ログインを兼ねるので、初回ログインとして記録する
     await pool.query(`UPDATE users SET last_login_at = now(), login_count = 1 WHERE id = $1`, [userId]);
@@ -292,11 +344,26 @@ auth.post('/reset-password', async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: '再設定リンクが無効か、期限切れです' });
     }
-    await client.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hashPassword(password), rows[0].user_id]);
-    await client.query(`DELETE FROM sessions WHERE user_id = $1`, [rows[0].user_id]);
+    const userId = rows[0].user_id as number;
+    const userQ = await client.query(
+      `UPDATE users
+          SET password_hash = $1,
+              email_verified_at = COALESCE(email_verified_at, now())
+        WHERE id = $2
+      RETURNING id, email, COALESCE(display_name, username) AS username,
+                (email_verified_at IS NOT NULL) AS email_verified`,
+      [hashPassword(password), userId],
+    );
+    if (!userQ.rows[0]) throw new Error('パスワード再設定対象のユーザーが見つかりません');
+    await client.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await client.query(`INSERT INTO sessions (token, user_id) VALUES ($1, $2)`, [sessionToken, userId]);
     await client.query('COMMIT');
-    clearSessionCookie(res);
-    res.json({ ok: true });
+    // 再設定メールは本人確認済みの導線なので、同じユーザーへそのままログインする。
+    // ログインID（メール/旧ユーザー名）の取り違えで別アカウントへ入る事故も防げる。
+    setSessionCookie(res, sessionToken);
+    pool.query(`DELETE FROM sessions WHERE created_at < now() - interval '30 days'`).catch(() => {});
+    res.json({ ok: true, user: userQ.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error(error);

@@ -883,8 +883,16 @@ api.get('/overview', async (req, res) => {
   const userId = uid(req);
   try {
     const gids = await scopedGroupIds(req);
-    const sQ = await pool.query(`SELECT * FROM user_settings WHERE user_id = $1`, [userId]);
-    const s = sQ.rows[0] ?? null;
+    // 大人/子どもの二重UIは廃止し、既存ユーザーも含めてマネコタウンへ統一する。
+    // 行がない旧ユーザーにも設定を作るため、初回表示で adult へ落ちない。
+    const sQ = await pool.query(
+      `INSERT INTO user_settings (user_id, mode)
+       VALUES ($1, 'kids')
+       ON CONFLICT (user_id) DO UPDATE SET mode = 'kids'
+       RETURNING *`,
+      [userId],
+    );
+    const s = sQ.rows[0];
 
     const zero = { rows: [{ total: 0 }] };
     const monthSpendQ = gids.length ? await pool.query(
@@ -931,7 +939,7 @@ api.get('/overview', async (req, res) => {
 
     const wallet = (s?.balance_start ?? 0) + incomeQ.rows[0].total - allSpendQ.rows[0].total - savedAll;
     res.json({
-      settings: s ? { ...s, level: levelOf(s.xp), costumes: normCostumes(s.costumes) } : null,
+      settings: { ...s, level: levelOf(s.xp), costumes: normCostumes(s.costumes) },
       month: { spend: monthSpendQ.rows[0].total, income: incomeQ.rows[0].month, byCategory: byCatQ.rows },
       wallet,
       goals: goalsQ.rows,
@@ -952,18 +960,14 @@ api.get('/overview', async (req, res) => {
 api.put('/settings', async (req, res) => {
   const userId = uid(req);
   const { mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done, active_group_id } = req.body ?? {};
-  if (mode !== undefined && mode !== 'kids' && mode !== 'adult') {
-    return res.status(400).json({ error: 'mode は kids / adult です' });
+  if (mode !== undefined && mode !== 'kids') {
+    return res.status(400).json({ error: '現在のUIはマネコタウンに統一されています' });
   }
   if (usage_type !== undefined && usage_type !== 'family' && usage_type !== 'personal') {
     return res.status(400).json({ error: 'usage_type は family / personal です' });
   }
   const num = (v: unknown) => (v === null ? null : Number.isFinite(Number(v)) ? Math.round(Number(v)) : undefined);
   try {
-    // 連携中の子は おとなモードへ切り替えできない（見守りを外せてしまうため）
-    if (mode === 'adult' && (await isLinkedChild(userId))) {
-      return res.status(403).json({ error: '連携中は おとなモードに きりかえできないよ' });
-    }
     if (active_group_id !== undefined) {
       const groupId = Number(active_group_id);
       const allowed = Number.isInteger(groupId) && (await userGroupIds(userId)).includes(groupId);
@@ -971,7 +975,7 @@ api.put('/settings', async (req, res) => {
     }
     const cur = (await pool.query(`SELECT * FROM user_settings WHERE user_id = $1`, [userId])).rows[0] ?? {};
     const next = {
-      mode: mode ?? cur.mode ?? 'adult',
+      mode: 'kids',
       monthly_income: monthly_income !== undefined ? num(monthly_income) : cur.monthly_income ?? null,
       monthly_budget: monthly_budget !== undefined ? num(monthly_budget) : cur.monthly_budget ?? null,
       allowance: allowance !== undefined ? num(allowance) : cur.allowance ?? null,

@@ -837,23 +837,15 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
 }
 
 // 利用タイプ（家族/個人）選択。usage_type が未選択のユーザーは必ずここを通る。
-// 新規ユーザーは家族・個人どちらもマネコタウンUIで開始する。
-// 既存ユーザーは現在の mode を維持し、利用タイプだけを変更する。
-function renderUsagePicker(existing: UserSettings | null) {
+// 新規・既存を問わず、家族・個人どちらもマネコタウンUIで開始する。
+function renderUsagePicker() {
   document.documentElement.style.background = document.body.style.background = '';
   const pick = async (usage: UsageType) => {
     try {
-      if (!existing) {
-        await api.saveSettings({ usage_type: usage, mode: 'kids' });
-        overviewCache = null;
-        homeTab = 'home';
-        await renderHome();
-      } else {
-        await api.saveSettings({ usage_type: usage });
-        overviewCache = null;
-        homeTab = 'home';
-        await renderHome();
-      }
+      await api.saveSettings({ usage_type: usage, mode: 'kids' });
+      overviewCache = null;
+      homeTab = 'home';
+      await renderHome();
     } catch (e) { alert((e as Error).message); }
   };
   const card = (usage: UsageType, emoji: string, title: string, desc: string) => {
@@ -1026,8 +1018,8 @@ async function renderHome() {
   if (epoch !== renderEpoch) return; // すでに新しい描画が始まっている
   const o = overviewCache;
   activeGroupId = o.settings?.active_group_id ?? activeGroupId ?? myGroups[0]?.id ?? null;
-  if (!o.settings) { renderUsagePicker(null); return; }
-  if (o.settings.usage_type == null) { renderUsagePicker(o.settings); return; } // 既存ユーザーも初回だけ利用タイプを選ばせる（mode は保持）
+  if (!o.settings) { renderUsagePicker(); return; }
+  if (o.settings.usage_type == null) { renderUsagePicker(); return; } // 既存ユーザーも初回だけ利用タイプを選ばせる
   const mode: AppMode = o.settings.mode;
   applyDisplayPreferences();
   syncEventsPolling(mode); // こどもモードなら着信ポーリング開始（おとなは停止）
@@ -3295,11 +3287,12 @@ async function renderAuthAction(): Promise<boolean> {
     }
     submit.setAttribute('disabled', 'true');
     try {
-      await api.resetPassword(token, password.value);
+      const result = await api.resetPassword(token, password.value);
+      currentUser = result.user;
       body.replaceChildren(
         el('h2', { textContent: '✓ パスワードを変更しました' }),
-        el('p', { class: 'muted', textContent: '新しいパスワードでログインしてください。' }),
-        el('a', { href: '/', class: 'primary auth-action-link', textContent: 'ログイン画面へ' }),
+        el('p', { class: 'muted', textContent: '同じアカウントにログインしました。データはそのまま引き継がれます。' }),
+        el('a', { href: '/', class: 'primary auth-action-link', textContent: 'マネコタウンを開く' }),
       );
     } catch (error) {
       submit.removeAttribute('disabled');
