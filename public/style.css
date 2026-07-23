@@ -1069,7 +1069,7 @@ body.theme-kids {
 
 /* テーマ表示中は main の余白を詰めてスマホ画面を全画面フィットに（body の二重スクロール防止）。
    ホーム（絶対配置840px）で縦がはみ出す場合だけ body スクロールする。 */
-body.theme-kids main, body.theme-adult main {
+body.theme-kids main#app, body.theme-adult main#app {
   margin: 0 auto;
   /* 上下の 4px 余白を廃止（外側背景の露出を無くす）。safe-area だけ残して standalone のノッチ回避。 */
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
@@ -1081,7 +1081,7 @@ body.theme-kids main, body.theme-adult main {
 /* こどもホーム（非fillキャンバス＝cover スケール・スマホ幅のみ）: キャンバスがビューポート全体を
    覆うゲーム画面なので safe-area 余白も外す（HUD は top:60px・ナビは bottom:26px でノッチ/ホームバーを回避）。 */
 @media (max-width: 500px) {
-  body.theme-kids main:has(> .pc-wrap > .pc-canvas:not(.fill)) { padding: 0; }
+  body.theme-kids main#app:has(> .pc-wrap > .pc-canvas:not(.fill)) { padding: 0; }
 }
 .pc-scroll {
   position: absolute; inset: 0;
@@ -1208,7 +1208,7 @@ body.theme-kids main, body.theme-adult main {
    目標（期限・ペース・ホームのスワイプカード）＋ こども世界観の統一
    ====================================================================== */
 /* PWA standalone でステータスバーに食い込まないように（4px 余白は廃止・safe-area のみ） */
-body.theme-kids main, body.theme-adult main {
+body.theme-kids main#app, body.theme-adult main#app {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -2104,7 +2104,12 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 720px;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: block;
+  gap: 0;
   overflow: hidden;
   isolation: isolate;
   color: #5b371b;
