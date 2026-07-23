@@ -138,6 +138,14 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
   const goalAmounts = goal
     ? `${goal.saved.toLocaleString('ja-JP')}円 / ${goal.target.toLocaleString('ja-JP')}円`
     : '貯金タブから始められます';
+  const budget = settings.monthly_budget;
+  const remaining = budget != null ? budget - overview.month.spend : null;
+  const month = new Date().getMonth() + 1;
+  const monthCardLabel = remaining != null ? '今月あと使える' : `${month}月の支出`;
+  const monthCardValue = remaining != null ? remaining : overview.month.spend;
+  const monthCardMeta = remaining != null
+    ? `支出 ${overview.month.spend.toLocaleString('ja-JP')}円 / 予算 ${budget!.toLocaleString('ja-JP')}円`
+    : '';
   const isFamily = settings.usage_type !== 'personal';
   const moving = percent > previousPercent;
   const html = `
@@ -146,9 +154,11 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
       <div class="kids-home-v3-shade" aria-hidden="true"></div>
 
       <header class="kids-home-v3-header">
-        <button type="button" id="k-wallet" class="kids-wallet-chip" aria-label="現在の残高。貯金画面を開く">
-          <span>残高</span><strong>¥${overview.wallet.toLocaleString('ja-JP')}</strong>
-        </button>
+        <section class="kids-month-chip" aria-label="${monthCardLabel} ${monthCardValue.toLocaleString('ja-JP')}円">
+          <span>${monthCardLabel}</span>
+          <strong>¥${monthCardValue.toLocaleString('ja-JP')}</strong>
+          ${monthCardMeta ? `<small>${monthCardMeta}</small>` : ''}
+        </section>
       </header>
       <button type="button" id="k-journey" class="kids-map-chip" aria-label="世界を見る">
         <span aria-hidden="true">🗺️</span>
@@ -163,7 +173,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
         <span class="kids-goal-meta">${goalAmounts}</span>
       </button>
 
-      <button type="button" id="k-town" class="kids-town-open" aria-label="マネコの旅を見る"></button>
+      <button type="button" id="k-town" class="kids-town-open" aria-label="風景をタップするとマネコ以外を隠します"></button>
 
       <div id="k-cat" class="kids-maneko-v3${moving ? ' is-moving' : ''}" aria-label="マネコ">
         <span class="kids-maneko-v3-shadow"></span>
@@ -174,9 +184,6 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
         <span id="k-bubble-text"></span>
       </div>
 
-      <button type="button" id="k-record" class="kids-record-fab">
-        <span aria-hidden="true">✎</span><strong>記録</strong>
-      </button>
       <div id="k-toast" class="kids-toast-v3" aria-live="polite"></div>
       ${kidsNavHtml('home', isFamily)}
     </main>`;
@@ -185,11 +192,16 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
   wireNav(canvas, args.goTab);
 
   const openMap = () => openJourney(overview, goal?.id);
-  canvas.querySelector('#k-town')?.addEventListener('click', openMap);
   canvas.querySelector('#k-journey')?.addEventListener('click', openMap);
   canvas.querySelector('#k-goal')?.addEventListener('click', () => args.goTab('savings'));
-  canvas.querySelector('#k-wallet')?.addEventListener('click', () => args.goTab('savings'));
-  canvas.querySelector('#k-record')?.addEventListener('click', () => args.goTab('add'));
+  const town = canvas.querySelector<HTMLElement>('#k-town');
+  const homeRoot = canvas.querySelector<HTMLElement>('.kids-home-v3') ?? canvas;
+  town?.addEventListener('click', () => {
+    const hidden = homeRoot.classList.toggle('kids-home-v3-ui-hidden');
+    town.setAttribute('aria-label', hidden
+      ? '風景をタップするとカードとメニューを表示します'
+      : '風景をタップするとマネコ以外を隠します');
+  });
 
   const bubble = canvas.querySelector<HTMLElement>('#k-bubble');
   const bubbleText = canvas.querySelector<HTMLElement>('#k-bubble-text');

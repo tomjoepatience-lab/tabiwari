@@ -6,6 +6,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,11 +20,13 @@ import * as Location from 'expo-location';
 const HOME_URL = 'https://tabiwari-mu.vercel.app';
 const HOME_HOST = 'tabiwari-mu.vercel.app';
 
-type MapPoint = { lat: number; lng: number; title?: string | null; subtitle?: string | null };
+type MapPoint = { lat: number; lng: number; name?: string | null; title?: string | null; subtitle?: string | null };
+type PickedPlace = { lat: number; lng: number; name?: string | null };
+type PlaceSearchResult = { lat: number; lng: number; name: string; detail: string };
 type NativeMapRequest = {
   type: 'OPEN_MAP_PICKER' | 'OPEN_MAP_VIEWER';
   requestId: string;
-  initial?: { lat: number; lng: number } | null;
+  initial?: PickedPlace | null;
   points?: MapPoint[];
   title?: string;
 };
@@ -53,7 +56,11 @@ export default function App() {
   const [hasError, setHasError] = useState(false);
   const [webUri, setWebUri] = useState(HOME_URL);
   const [mapRequest, setMapRequest] = useState<NativeMapRequest | null>(null);
-  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
+  const [picked, setPicked] = useState<PickedPlace | null>(null);
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeResults, setPlaceResults] = useState<PlaceSearchResult[]>([]);
+  const [placeSearching, setPlaceSearching] = useState(false);
+  const [placeSearchMessage, setPlaceSearchMessage] = useState('');
 
   const points = mapRequest?.points ?? [];
   const initialRegion = useMemo<Region>(() => {
@@ -101,6 +108,9 @@ export default function App() {
     );
     setMapRequest(null);
     setPicked(null);
+    setPlaceQuery('');
+    setPlaceResults([]);
+    setPlaceSearchMessage('');
   }, [mapRequest]);
 
   const useCurrentLocation = useCallback(async () => {
@@ -117,11 +127,59 @@ export default function App() {
     });
   }, []);
 
+  const choosePlace = useCallback((place: PickedPlace) => {
+    setPicked(place);
+    setPlaceQuery(place.name ?? '');
+    setPlaceResults([]);
+    setPlaceSearchMessage('');
+    mapRef.current?.animateToRegion({
+      latitude: place.lat,
+      longitude: place.lng,
+      latitudeDelta: 0.012,
+      longitudeDelta: 0.012,
+    });
+  }, []);
+
+  const searchPlaces = useCallback(async () => {
+    const query = placeQuery.trim();
+    if (!query || placeSearching) return;
+    setPlaceSearching(true);
+    try {
+      const url =
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}` +
+        '&accept-language=ja&limit=8&namedetails=1&addressdetails=1';
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const json = response.ok ? await response.json() : [];
+      const results = (Array.isArray(json) ? json : [])
+        .map((item: any): PlaceSearchResult | null => {
+          const lat = Number(item.lat);
+          const lng = Number(item.lon);
+          const name =
+            item.namedetails?.['name:ja'] || item.namedetails?.name || item.name ||
+            (typeof item.display_name === 'string' ? item.display_name.split(',')[0] : '');
+          if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+          return { lat, lng, name, detail: item.display_name ?? '' };
+        })
+        .filter((item: PlaceSearchResult | null): item is PlaceSearchResult => item != null)
+        .slice(0, 4);
+      setPlaceResults(results);
+      setPlaceSearchMessage(results.length ? '' : '見つかりませんでした。地図を直接タップして選ぶこともできます。');
+    } catch {
+      setPlaceResults([]);
+      setPlaceSearchMessage('検索できませんでした。地図を直接タップして選んでください。');
+    } finally {
+      setPlaceSearching(false);
+    }
+  }, [placeQuery, placeSearching]);
+
   const handleWebMessage = useCallback((event: any) => {
     try {
       const message = JSON.parse(event.nativeEvent.data) as NativeMapRequest;
       if (message.type !== 'OPEN_MAP_PICKER' && message.type !== 'OPEN_MAP_VIEWER') return;
       setPicked(message.initial ?? null);
+      setPlaceQuery(message.initial?.name ?? '');
+      setPlaceResults([]);
+      setPlaceSearchMessage('');
       setMapRequest(message);
     } catch {
       // アプリが理解しないWebメッセージは無視する。
@@ -216,6 +274,15 @@ export default function App() {
               setPicked({
                 lat: event.nativeEvent.coordinate.latitude,
                 lng: event.nativeEvent.coordinate.longitude,
+                name: null,
+              });
+            }}
+            onPoiClick={(event) => {
+              if (mapRequest?.type !== 'OPEN_MAP_PICKER') return;
+              choosePlace({
+                lat: event.nativeEvent.coordinate.latitude,
+                lng: event.nativeEvent.coordinate.longitude,
+                name: event.nativeEvent.name ?? null,
               });
             }}
           >
@@ -234,8 +301,9 @@ export default function App() {
                 onDragEnd={(event) => setPicked({
                   lat: event.nativeEvent.coordinate.latitude,
                   lng: event.nativeEvent.coordinate.longitude,
+                  name: null,
                 })}
-                title="この場所を選択"
+                title={picked.name ?? 'この場所を選択'}
               />
             )}
           </MapView>
@@ -247,8 +315,41 @@ export default function App() {
             <View style={styles.mapHeaderSpacer} />
           </View>
           {mapRequest?.type === 'OPEN_MAP_PICKER' && (
+            <View style={styles.mapSearch}>
+              <View style={styles.mapSearchRow}>
+                <TextInput
+                  value={placeQuery}
+                  onChangeText={setPlaceQuery}
+                  onSubmitEditing={searchPlaces}
+                  placeholder="店名・場所を検索"
+                  returnKeyType="search"
+                  autoCorrect={false}
+                  style={styles.mapSearchInput}
+                />
+                <TouchableOpacity style={styles.mapSearchButton} onPress={searchPlaces}>
+                  <Text style={styles.mapSearchButtonText}>{placeSearching ? '…' : '検索'}</Text>
+                </TouchableOpacity>
+              </View>
+              {!!placeSearchMessage && !placeSearching && (
+                <Text style={styles.mapSearchEmpty}>{placeSearchMessage}</Text>
+              )}
+              {placeResults.map((place, index) => (
+                <TouchableOpacity
+                  key={`${place.lat}:${place.lng}:${index}`}
+                  style={styles.mapSearchResult}
+                  onPress={() => choosePlace(place)}
+                >
+                  <Text style={styles.mapSearchResultName} numberOfLines={1}>{place.name}</Text>
+                  <Text style={styles.mapSearchResultDetail} numberOfLines={1}>{place.detail}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {mapRequest?.type === 'OPEN_MAP_PICKER' && (
             <View style={styles.mapBottomSheet}>
-              <Text style={styles.mapHint}>地図をタップしてピンを置けます</Text>
+              <Text style={styles.mapHint}>
+                {picked?.name ?? (picked ? '選択した地点' : '店名を検索するか、地図をタップしてください')}
+              </Text>
               <View style={styles.mapActions}>
                 <TouchableOpacity style={styles.locationButton} onPress={useCurrentLocation}>
                   <Text style={styles.locationButtonText}>📍 現在地</Text>
@@ -353,6 +454,67 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#302a24',
+  },
+  mapSearch: {
+    position: 'absolute',
+    top: 112,
+    left: 12,
+    right: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    overflow: 'hidden',
+  },
+  mapSearchRow: {
+    padding: 8,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mapSearchInput: {
+    flex: 1,
+    minHeight: 42,
+    paddingHorizontal: 13,
+    borderRadius: 13,
+    backgroundColor: '#f4f1ea',
+    color: '#302a24',
+    fontSize: 14,
+  },
+  mapSearchButton: {
+    minWidth: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    backgroundColor: '#e8b62b',
+  },
+  mapSearchButtonText: {
+    color: '#3a2a00',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  mapSearchEmpty: {
+    paddingHorizontal: 13,
+    paddingBottom: 9,
+    color: '#847b6f',
+    fontSize: 10,
+  },
+  mapSearchResult: {
+    paddingVertical: 9,
+    paddingHorizontal: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e6dfd3',
+  },
+  mapSearchResultName: {
+    color: '#302a24',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  mapSearchResultDetail: {
+    marginTop: 2,
+    color: '#847b6f',
+    fontSize: 10,
   },
   mapBottomSheet: {
     position: 'absolute',

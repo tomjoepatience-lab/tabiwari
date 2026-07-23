@@ -4,6 +4,7 @@
 export type NativeMapPoint = {
   lat: number;
   lng: number;
+  name?: string | null;
   title?: string | null;
   subtitle?: string | null;
 };
@@ -45,7 +46,7 @@ function request<T>(type: string, payload: object): Promise<T | null> | null {
 }
 
 export function openNativeMapPicker(initial: { lat: number; lng: number } | null) {
-  return request<{ lat: number; lng: number }>('OPEN_MAP_PICKER', { initial });
+  return request<{ lat: number; lng: number; name?: string | null }>('OPEN_MAP_PICKER', { initial });
 }
 
 export function openNativeMapViewer(points: NativeMapPoint[], title: string) {

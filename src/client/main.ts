@@ -8,6 +8,7 @@ import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
 import { goalIconPath, kidsHome, kidsNavHtml, kidsPhotoShell, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
 import { closeJourney, featuredGoal, currentStage, STAGES } from './journey';
+import { openJourney as openTownJourney } from './journey-town';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { stageBackdrop } from './stage';
 import { phoneCanvas, esc } from './phone';
@@ -344,7 +345,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
   const placeValue = el('span', { class: 'kids-photo-row-value', textContent: '未設定' });
   const placeRow = el('button', { type: 'button', class: 'kids-photo-info-row' }, [
     kidsLineIcon('pin', 'kids-photo-row-icon'),
-    el('strong', { textContent: '場所' }),
+    el('strong', { textContent: '場所（任意）' }),
     placeValue,
     el('span', { class: 'kids-photo-chevron', textContent: '›' }),
   ]);
@@ -453,7 +454,6 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
         kidsLineIcon('tag', 'kids-photo-row-icon'),
         el('strong', { textContent: '費目' }),
         genreControl,
-        el('span', { class: 'kids-photo-chevron', textContent: '›' }),
       ]),
       placeRow,
       ...(myGroups.length > 1 ? [destinationsRow] : []),
@@ -483,6 +483,7 @@ function kidsReportPhoto(o: Overview, recent: RecentReceipt[], incomes: IncomeRo
     ]),
     genreReportSec(recent),
     ...reportPanel(recent),
+    mapPanel(recent),
     calendarPanel(recent, false, incomes),
     backToRecord,
   ];
@@ -588,6 +589,13 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
     }
   });
 
+  const nextJourney = el('button', { type: 'button', class: 'kids-photo-next-row' }, [
+    el('span', { textContent: '🗺️' }),
+    nextText,
+    el('b', { textContent: '›' }),
+  ]);
+  nextJourney.addEventListener('click', () => openTownJourney(o, selected?.id));
+
   const body = [
     el('h1', { class: 'kids-photo-title', textContent: '目標貯金' }),
     ...(o.goals.length > 1 ? [goalSelect] : []),
@@ -602,11 +610,7 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
     ]),
     quick,
     deposit,
-    el('button', { type: 'button', class: 'kids-photo-next-row' }, [
-      el('span', { textContent: '🗺️' }),
-      nextText,
-      el('b', { textContent: '›' }),
-    ]),
+    nextJourney,
     el('details', { class: 'kids-photo-manage' }, [
       el('summary', { textContent: '目標を変更・追加' }),
       el('div', { class: 'kids-photo-manage-body' }, [
@@ -1333,16 +1337,16 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     try {
       await api.saveSettings(kids
         ? (isPersonal
-          ? { balance_start: num(startBal) ?? 0 }
-          : { allowance: num(allowance), balance_start: num(startBal) ?? 0 })
+          ? { monthly_budget: num(budget), balance_start: num(startBal) ?? 0 }
+          : { allowance: num(allowance), monthly_budget: num(budget), balance_start: num(startBal) ?? 0 })
         : { monthly_budget: num(budget), monthly_income: num(income) });
       overviewCache = null;
       await renderHome();
     } catch (e) { alert((e as Error).message); }
   });
   const kidsMoneyFields = isPersonal
-    ? [labeled('お財布のスタート額', startBal), saveBtn]
-    : [labeled('月のお小遣い', allowance), labeled('お財布のスタート額', startBal), saveBtn];
+    ? [labeled('月の予算（任意）', budget), labeled('お財布のスタート額', startBal), saveBtn]
+    : [labeled('月のお小遣い', allowance), labeled('月の予算（任意）', budget), labeled('お財布のスタート額', startBal), saveBtn];
   const moneySec = el('section', { class: 'card' }, [
     el('h2', { textContent: kids
       ? (isPersonal ? '💰 お財布の設定' : '💰 お小遣いの設定')
@@ -1351,9 +1355,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
       ? kidsMoneyFields
       : [labeled('月の予算', budget), labeled('月の収入（手取り）', income), saveBtn]),
     el('p', { class: 'muted', textContent: kids
-      ? (isPersonal
-        ? '現在のお財布残高の基準になる金額です。'
-        : 'お小遣いをもらったら「貯金」タブからお財布に追加できます。')
+      ? '予算を設定するとホームに「今月あと使える」を表示します。未設定なら今月の支出を表示します。'
       : '予算を設定するとホームに「今月あと使える」が表示されます。' }),
   ]);
 
@@ -2551,7 +2553,7 @@ function loadGoogleMaps(key: string): Promise<any> {
   if (gmapsPromise) return gmapsPromise;
   gmapsPromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&libraries=places&language=ja&region=JP`;
     s.async = true;
     s.onload = () => (w.google?.maps ? resolve(w.google) : reject(new Error('maps unavailable')));
     s.onerror = () => reject(new Error('maps script error'));
@@ -2637,8 +2639,9 @@ async function openMapPicker(initial: { lat: number; lng: number } | null): Prom
   if (native) {
     const point = await native;
     if (!point) return null;
+    if (point.name) return { lat: point.lat, lng: point.lng, name: point.name };
     const place = await reverseGeocode(point.lat, point.lng);
-    return { ...point, name: place.name || null };
+    return { lat: point.lat, lng: point.lng, name: place.name || null };
   }
   const start = initial ?? { lat: 35.681, lng: 139.767 };
   let picked: { lat: number; lng: number } | null = initial ? { ...initial } : null;
@@ -2734,7 +2737,14 @@ async function openMapPicker(initial: { lat: number; lng: number } | null): Prom
 
   // 地図の初期化（Google が使えれば Google、ダメなら Leaflet）
   const initGoogle = (google: any) => {
-    const map = new google.maps.Map(mapDiv, { center: { lat: start.lat, lng: start.lng }, zoom: initial ? 16 : 13, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+    const map = new google.maps.Map(mapDiv, {
+      center: { lat: start.lat, lng: start.lng },
+      zoom: initial ? 16 : 13,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      clickableIcons: true,
+    });
     let marker: any = null;
     setPin = (lat, lng) => {
       if (!marker) {
@@ -2743,7 +2753,35 @@ async function openMapPicker(initial: { lat: number; lng: number } | null): Prom
       } else marker.setPosition({ lat, lng });
     };
     panTo = (lat, lng, zoom) => { map.panTo({ lat, lng }); if (zoom) map.setZoom(zoom); };
-    map.addListener('click', (e: any) => { if (e.placeId && e.stop) e.stop(); setPicked(e.latLng.lat(), e.latLng.lng(), null, true); });
+    map.addListener('click', (e: any) => {
+      const lat = e.latLng.lat();
+      const lng = e.latLng.lng();
+      if (!e.placeId) {
+        void setPicked(lat, lng, null, true);
+        return;
+      }
+      e.stop?.();
+      const service = google.maps.places?.PlacesService
+        ? new google.maps.places.PlacesService(map)
+        : null;
+      if (!service) {
+        void setPicked(lat, lng, null, true);
+        return;
+      }
+      service.getDetails(
+        { placeId: e.placeId, fields: ['name', 'geometry'] },
+        (place: any, status: any) => {
+          const ok = status === google.maps.places.PlacesServiceStatus.OK;
+          const point = place?.geometry?.location;
+          void setPicked(
+            point?.lat?.() ?? lat,
+            point?.lng?.() ?? lng,
+            ok ? place?.name ?? null : null,
+            !ok || !place?.name,
+          );
+        },
+      );
+    });
     if (picked) setPin(picked.lat, picked.lng);
   };
   const initLeaflet = () => {
