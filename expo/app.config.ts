@@ -23,6 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       infoPlist: {
         ...baseConfig.ios?.infoPlist,
         NSLocationWhenInUseUsageDescription: '支出を記録した場所を地図で選ぶために使用します',
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     plugins: [
