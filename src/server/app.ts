@@ -38,11 +38,30 @@ app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, db });
 });
 
+// iOS Universal Links。APPLE_TEAM_IDを本番環境に設定すると招待URLが直接Expo版を開く。
+app.get('/.well-known/apple-app-site-association', (_req, res) => {
+  const teamId = process.env.APPLE_TEAM_ID;
+  res.type('application/json').json({
+    applinks: {
+      apps: [],
+      details: teamId ? [{
+        appID: `${teamId}.com.tomjo.maneko`,
+        components: [{ '/': '/invite/*', comment: 'マネコ家計簿の共有スペース招待' }],
+      }] : [],
+    },
+  });
+});
+
 app.use(attachUser);              // 有効セッションなら req.userId を付与
 app.use('/api/auth', auth);       // 登録・ログイン・ログアウト・me（認証不要）
 app.use('/api', requireAuth, api);// プロジェクト系APIはログイン必須＋グループで絞り込み
 
 app.use(express.static(publicDir));
+// Universal Link / 招待URLをブラウザで開いた場合も同じSPAを返す。
+// クライアントがpathnameからトークンを読み、ログイン後に参加処理を完了する。
+app.get('/invite/:token', (_req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
 // ※ Vercel では public/ はプラットフォームが自動で静的配信する想定のため、この行は主に
 //   ローカル開発(npm run dev)とRenderでの配信を担う。Vercel環境でも到達すれば動作するが、
 //   通常は静的アセットへのリクエストが関数まで届く前にVercel側で処理される。

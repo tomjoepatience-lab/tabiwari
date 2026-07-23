@@ -5,12 +5,14 @@
   },
   "build": {
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "ios": {
         "autoIncrement": true
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "ios": {
         "autoIncrement": true

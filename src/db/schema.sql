@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,           -- scrypt（salt:hash の16進）
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- App Store版: メールをログインID、display_nameをアプリ内表示名として使う。
+-- 既存ユーザーを壊さないため email は移行時点ではNULL可。新規登録APIでは必須。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
+  ON users (lower(email)) WHERE email IS NOT NULL;
 -- 既存DB向け（冪等）: アクセスの見える化（誰がいつ作った/ログインしたか。scripts/who.ts で確認）
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count integer NOT NULL DEFAULT 0;
@@ -80,6 +86,19 @@ CREATE TABLE IF NOT EXISTS group_members (
   role     TEXT NOT NULL DEFAULT 'member',  -- 'owner' / 'member'
   PRIMARY KEY (group_id, user_id)
 );
+
+-- 共有スペースへの期限付き招待URL。user_groups.invite_code は旧クライアント互換で残す。
+CREATE TABLE IF NOT EXISTS group_invites (
+  token       TEXT PRIMARY KEY,
+  group_id    INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  created_by  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  max_uses    INTEGER NOT NULL DEFAULT 10 CHECK (max_uses > 0),
+  use_count   INTEGER NOT NULL DEFAULT 0,
+  revoked_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_group_invites_group ON group_invites (group_id);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,           -- ランダムな不透明トークン（cookie に保存）
@@ -139,6 +158,8 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_summary_shown TEXT;
 -- iOSアプリ化M2: 利用タイプ（家族/個人）＋初回チュートリアル既読
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS usage_type TEXT;   -- 'family' | 'personal' | NULL(未選択)
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS tutorial_done BOOLEAN NOT NULL DEFAULT false;
+-- ホーム・記録・レポートで現在選択中の家計簿スペース。
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS active_group_id INTEGER REFERENCES user_groups(id) ON DELETE SET NULL;
 
 -- v2 衣装システム: 重ね小物6種を複数所持・複数装備（owned/equipped は衣装IDの配列）。
 -- 旧 costume TEXT（beret/scarf）は新6種に該当なしのため owned へは移行せず残置（以後未使用）。

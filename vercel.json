@@ -1,7 +1,9 @@
 {
   "buildCommand": "npm run build",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" }
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/invite/(.*)", "destination": "/api/index" },
+    { "source": "/.well-known/apple-app-site-association", "destination": "/api/index" }
   ],
   "functions": {
     "api/index.js": {

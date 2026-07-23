@@ -2,7 +2,7 @@
 
 export type ProjectKind = 'trip' | 'daily';
 export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: number; group_name?: string; start_date: string | null; end_date: string | null; monthly_budget?: number | null; total?: number };
-export type User = { id: number; username: string };
+export type User = { id: number; username: string; email?: string | null };
 export type Group = { id: number; name: string; invite_code: string; role: string; members?: number };
 export type Me = { user: User; groups: Group[] };
 export type Member = { id: number; name: string; weight: number };
@@ -43,6 +43,7 @@ export type UserSettings = {
   last_summary_shown: string | null; // 月初サマリーを表示済みの月（YYYY-MM）
   usage_type: UsageType | null; // 利用タイプ（家族/個人）。NULL=未選択（初回に選ばせる）
   tutorial_done: boolean;       // 初回チュートリアルの既読
+  active_group_id: number | null; // 現在表示中の家計簿スペース
 };
 export type Rarity = 'normal' | 'rare' | 'super';
 export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
@@ -126,16 +127,30 @@ export const api = {
     if (r.status === 401) return null;
     return json<Me>(r);
   },
-  register: (body: { username: string; password: string }) =>
+  register: (body: { email: string; display_name: string; password: string }) =>
     fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
-  login: (body: { username: string; password: string }) =>
+  login: (body: { email: string; password: string }) =>
     fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }),
+  deleteAccount: (password: string) =>
+    fetch('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }).then(async (r) => {
+      if (!r.ok) await json(r);
+    }),
   listGroups: () => fetch('/api/groups').then((r) => json<Group[]>(r)),
   createGroup: (name: string) =>
     fetch('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Group>(r)),
   joinGroup: (invite_code: string) =>
     fetch('/api/groups/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite_code }) }).then((r) => json<Group>(r)),
+  createGroupInvite: (groupId: number) =>
+    fetch(`/api/groups/${groupId}/invites`, { method: 'POST' }).then((r) => json<{ token: string; url: string; expires_at: string }>(r)),
+  joinInvite: (token: string) =>
+    fetch(`/api/invites/${encodeURIComponent(token)}/join`, { method: 'POST' }).then((r) => json<{ id: number; name: string }>(r)),
+  inviteInfo: (token: string) =>
+    fetch(`/api/auth/invites/${encodeURIComponent(token)}`).then((r) => json<{ name: string; expires_at: string }>(r)),
 
   listTrips: () => fetch('/api/trips').then((r) => json<Trip[]>(r)),
   getTrip: (id: number) => fetch(`/api/trips/${id}`).then((r) => json<TripDetail>(r)),
@@ -161,20 +176,20 @@ export const api = {
   generateRecurring: (tripId: number, month?: string) =>
     fetch(`/api/trips/${tripId}/recurring/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }).then((r) => json<{ created: number; skipped: number; month: string }>(r)),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
-  recentExpenses: (days = 30) =>
-    fetch(`/api/expenses/recent?days=${days}`).then((r) => json<{ receipts: RecentReceipt[] }>(r)),
+  recentExpenses: (days = 30, groupId?: number) =>
+    fetch(`/api/expenses/recent?days=${days}${groupId ? `&group_id=${groupId}` : ''}`).then((r) => json<{ receipts: RecentReceipt[] }>(r)),
   quickExpense: (body: {
     store_name?: string; category?: string; purchased_on: string;
     items: { name: string; price: number; genre?: string }[];
     lat?: number | null; lng?: number | null; place_name?: string | null;
-    photos?: string[];
+    photos?: string[]; group_id?: number;
   }) =>
     fetch('/api/expenses/quick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ receipt_id: number; trip_id: number; reward: QuickReward }>(r)),
   setItemGenre: (id: number, genre: string) =>
     fetch(`/api/items/${id}/genre`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ genre }) }).then((r) => json<{ id: number; genre: string }>(r)),
   // モード・ゲーミフィケーション
-  overview: () => fetch('/api/overview').then((r) => json<Overview>(r)),
-  saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string; usage_type: UsageType; tutorial_done: boolean }>) =>
+  overview: (groupId?: number) => fetch(`/api/overview${groupId ? `?group_id=${groupId}` : ''}`).then((r) => json<Overview>(r)),
+  saveSettings: (body: Partial<{ mode: AppMode; monthly_income: number | null; monthly_budget: number | null; allowance: number | null; balance_start: number; costume: string | null; last_summary_shown: string; usage_type: UsageType; tutorial_done: boolean; active_group_id: number }>) =>
     fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<UserSettings>(r)),
   addGoal: (body: { name: string; emoji?: string; target: number; deadline?: string }) =>
     fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<SavingsGoal>(r)),

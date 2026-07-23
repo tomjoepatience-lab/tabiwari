@@ -15,6 +15,20 @@ api.get('/config', (_req, res) => {
 
 // requireAuth 通過後なので userId は必ずある
 const uid = (req: Request) => (req as any).userId as number;
+const publicAppUrl = () => (process.env.PUBLIC_APP_URL || 'https://tabiwari-mu.vercel.app').replace(/\/+$/, '');
+
+// 指定されたスペースが本人の所属先ならその1件、未指定なら設定中のスペース、
+// それも無ければ最初の所属先を返す。
+async function scopedGroupIds(req: Request): Promise<number[]> {
+  const userId = uid(req);
+  const available = await userGroupIds(userId);
+  if (!available.length) return [];
+  const requested = Number(req.query.group_id);
+  if (Number.isInteger(requested) && available.includes(requested)) return [requested];
+  const { rows } = await pool.query(`SELECT active_group_id FROM user_settings WHERE user_id = $1`, [userId]);
+  const active = rows[0]?.active_group_id as number | null | undefined;
+  return active && available.includes(active) ? [active] : [available[0]];
+}
 
 // 500 応答でDBの生エラー（テーブル名・制約名など）を漏らさない。詳細はサーバーログのみ。
 function serverError(res: any, e: unknown) {
@@ -154,6 +168,72 @@ api.post('/groups/join', async (req, res) => {
     [g.rows[0].id, uid(req)]
   );
   res.status(201).json({ ...g.rows[0], role: 'member' });
+});
+
+// 家計簿スペースの期限付き招待URLを発行（既定7日・10回まで）。
+api.post('/groups/:id/invites', async (req, res) => {
+  const groupId = Number(req.params.id);
+  const userId = uid(req);
+  const access = await pool.query(
+    `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+    [groupId, userId]
+  );
+  if (!access.rows[0]) return res.status(403).json({ error: 'この家計簿スペースには参加していません' });
+  const token = crypto.randomBytes(24).toString('base64url');
+  const { rows } = await pool.query(
+    `INSERT INTO group_invites (token, group_id, created_by, expires_at)
+     VALUES ($1, $2, $3, now() + interval '7 days')
+     RETURNING token, expires_at`,
+    [token, groupId, userId]
+  );
+  res.status(201).json({
+    ...rows[0],
+    url: `${publicAppUrl()}/invite/${token}`,
+  });
+});
+
+api.post('/invites/:token/join', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT gi.group_id, g.name
+         FROM group_invites gi
+         JOIN user_groups g ON g.id = gi.group_id
+        WHERE gi.token = $1
+          AND gi.revoked_at IS NULL
+          AND gi.expires_at > now()
+          AND gi.use_count < gi.max_uses
+        FOR UPDATE OF gi`,
+      [req.params.token]
+    );
+    const invite = rows[0];
+    if (!invite) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'この招待は無効または期限切れです' });
+    }
+    const joined = await client.query(
+      `INSERT INTO group_members (group_id, user_id)
+       VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING group_id`,
+      [invite.group_id, uid(req)]
+    );
+    if (joined.rows.length) {
+      await client.query(`UPDATE group_invites SET use_count = use_count + 1 WHERE token = $1`, [req.params.token]);
+    }
+    await client.query(
+      `INSERT INTO user_settings (user_id, active_group_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET active_group_id = EXCLUDED.active_group_id`,
+      [uid(req), invite.group_id]
+    );
+    await client.query('COMMIT');
+    res.status(201).json({ id: invite.group_id, name: invite.name });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    serverError(res, e);
+  } finally {
+    client.release();
+  }
 });
 
 // ---- レシートOCR（Gemini vision で明細抽出） -------------------------
@@ -750,7 +830,7 @@ api.get('/analytics', async (req, res) => {
 
 // ---- 直近の支出（キャラ反応・カレンダー・レポート用の横断取得） --------
 api.get('/expenses/recent', async (req, res) => {
-  const gids = await userGroupIds(uid(req));
+  const gids = await scopedGroupIds(req);
   if (!gids.length) return res.json({ receipts: [] });
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 400);
   const { rows } = await pool.query(
@@ -780,7 +860,7 @@ const levelOf = (xp: number) => 1 + Math.floor(Math.sqrt(Math.max(0, xp)) / 5);
 api.get('/overview', async (req, res) => {
   const userId = uid(req);
   try {
-    const gids = await userGroupIds(userId);
+    const gids = await scopedGroupIds(req);
     const sQ = await pool.query(`SELECT * FROM user_settings WHERE user_id = $1`, [userId]);
     const s = sQ.rows[0] ?? null;
 
@@ -849,7 +929,7 @@ api.get('/overview', async (req, res) => {
 // 設定の作成/部分更新（初回のモード選択もここ）
 api.put('/settings', async (req, res) => {
   const userId = uid(req);
-  const { mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done } = req.body ?? {};
+  const { mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done, active_group_id } = req.body ?? {};
   if (mode !== undefined && mode !== 'kids' && mode !== 'adult') {
     return res.status(400).json({ error: 'mode は kids / adult です' });
   }
@@ -861,6 +941,11 @@ api.put('/settings', async (req, res) => {
     // 連携中の子は おとなモードへ切り替えできない（見守りを外せてしまうため）
     if (mode === 'adult' && (await isLinkedChild(userId))) {
       return res.status(403).json({ error: '連携中は おとなモードに きりかえできないよ' });
+    }
+    if (active_group_id !== undefined) {
+      const groupId = Number(active_group_id);
+      const allowed = Number.isInteger(groupId) && (await userGroupIds(userId)).includes(groupId);
+      if (!allowed) return res.status(403).json({ error: 'この家計簿スペースには参加していません' });
     }
     const cur = (await pool.query(`SELECT * FROM user_settings WHERE user_id = $1`, [userId])).rows[0] ?? {};
     const next = {
@@ -874,14 +959,16 @@ api.put('/settings', async (req, res) => {
         ? last_summary_shown : cur.last_summary_shown ?? null,
       usage_type: usage_type !== undefined ? usage_type : cur.usage_type ?? null,
       tutorial_done: tutorial_done !== undefined ? Boolean(tutorial_done) : cur.tutorial_done ?? false,
+      active_group_id: active_group_id !== undefined ? Number(active_group_id) : cur.active_group_id ?? null,
     };
     const { rows } = await pool.query(
-      `INSERT INTO user_settings (user_id, mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO user_settings (user_id, mode, monthly_income, monthly_budget, allowance, balance_start, costume, last_summary_shown, usage_type, tutorial_done, active_group_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (user_id) DO UPDATE SET mode = $2, monthly_income = $3, monthly_budget = $4,
-         allowance = $5, balance_start = $6, costume = $7, last_summary_shown = $8, usage_type = $9, tutorial_done = $10
+         allowance = $5, balance_start = $6, costume = $7, last_summary_shown = $8, usage_type = $9,
+         tutorial_done = $10, active_group_id = $11
        RETURNING *`,
-      [userId, next.mode, next.monthly_income, next.monthly_budget, next.allowance, next.balance_start, next.costume, next.last_summary_shown, next.usage_type, next.tutorial_done]
+      [userId, next.mode, next.monthly_income, next.monthly_budget, next.allowance, next.balance_start, next.costume, next.last_summary_shown, next.usage_type, next.tutorial_done, next.active_group_id]
     );
     res.json({ ...rows[0], level: levelOf(rows[0].xp) });
   } catch (e) {
@@ -1081,7 +1168,7 @@ api.get('/events', async (req, res) => {
 // 品名＋金額だけで記録できるようにする（記録までの道のりを最短に）。
 api.post('/expenses/quick', async (req, res) => {
   const userId = uid(req);
-  const { store_name, category, purchased_on, items, lat, lng, place_name, photos } = req.body ?? {};
+  const { group_id, store_name, category, purchased_on, items, lat, lng, place_name, photos } = req.body ?? {};
   const storeStr = typeof store_name === 'string' && store_name.trim() ? store_name.trim() : null;
   const list: { name: string; price: number; genre: string }[] = Array.isArray(items)
     ? items
@@ -1108,7 +1195,7 @@ api.post('/expenses/quick', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const uname = (await client.query(`SELECT username FROM users WHERE id = $1`, [userId])).rows[0]?.username ?? 'わたし';
+    const uname = (await client.query(`SELECT COALESCE(display_name, username) AS username FROM users WHERE id = $1`, [userId])).rows[0]?.username ?? 'わたし';
     // 1) グループ（無ければ個人用を自動作成）
     let gids = (await client.query(`SELECT group_id FROM group_members WHERE user_id = $1 ORDER BY group_id`, [userId]))
       .rows.map((r) => r.group_id as number);
@@ -1117,6 +1204,18 @@ api.post('/expenses/quick', async (req, res) => {
       const g = await client.query(`INSERT INTO user_groups (name, invite_code) VALUES ($1, $2) RETURNING id`, [`${uname}の家計簿`, code]);
       await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
       gids = [g.rows[0].id];
+    }
+    const requestedGroup = Number(group_id);
+    if (Number.isInteger(requestedGroup)) {
+      if (!gids.includes(requestedGroup)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'この家計簿スペースには参加していません' });
+      }
+      gids = [requestedGroup];
+    } else {
+      const active = (await client.query(`SELECT active_group_id FROM user_settings WHERE user_id = $1`, [userId])).rows[0]?.active_group_id;
+      if (active && gids.includes(active)) gids = [active];
+      else gids = [gids[0]];
     }
     // 2) 日常プロジェクト（無ければ自動作成）
     let trip = (await client.query(
@@ -1271,7 +1370,7 @@ api.post('/links/join', async (req, res) => {
         `INSERT INTO account_links (parent_user_id, child_user_id) VALUES ($1, $2) RETURNING id`,
         [parentId, userId]);
       await client.query(`UPDATE link_codes SET used = true WHERE code = $1`, [code]);
-      const pQ = await client.query(`SELECT username FROM users WHERE id = $1`, [parentId]);
+      const pQ = await client.query(`SELECT COALESCE(display_name, username) AS username FROM users WHERE id = $1`, [parentId]);
       await client.query('COMMIT');
       res.status(201).json({ id: linkQ.rows[0].id, parent: { username: pQ.rows[0]?.username ?? '' } });
     } catch (e: any) {
@@ -1291,11 +1390,11 @@ api.get('/links', async (req, res) => {
   const userId = uid(req);
   try {
     const asParentQ = await pool.query(
-      `SELECT al.id, al.child_user_id, u.username, al.created_at
+      `SELECT al.id, al.child_user_id, COALESCE(u.display_name, u.username) AS username, al.created_at
          FROM account_links al JOIN users u ON u.id = al.child_user_id
         WHERE al.parent_user_id = $1 ORDER BY al.id`, [userId]);
     const asChildQ = await pool.query(
-      `SELECT al.id, u.username
+      `SELECT al.id, COALESCE(u.display_name, u.username) AS username
          FROM account_links al JOIN users u ON u.id = al.parent_user_id
         WHERE al.child_user_id = $1`, [userId]);
     res.json({ asParent: asParentQ.rows, asChild: asChildQ.rows[0] ?? null });
@@ -1329,7 +1428,7 @@ api.get('/children/:childId/overview', async (req, res) => {
     const gids = await userGroupIds(childId);
     const zero = { rows: [{ total: 0 }] };
 
-    const userQ = await pool.query(`SELECT username FROM users WHERE id = $1`, [childId]);
+    const userQ = await pool.query(`SELECT COALESCE(display_name, username) AS username FROM users WHERE id = $1`, [childId]);
     const settingsQ = await pool.query(`SELECT balance_start FROM user_settings WHERE user_id = $1`, [childId]);
     const balanceStart = settingsQ.rows[0]?.balance_start ?? 0;
 

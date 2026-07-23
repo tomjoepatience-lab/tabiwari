@@ -23,6 +23,12 @@
           "imageWidth": 200
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b91ed440-4ce0-47ef-8ec7-4edb5061f549"
+      }
+    },
+    "owner": "tomjo"
   }
 }

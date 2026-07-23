@@ -1,7 +1,8 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
+  Modal,
   StatusBar,
   StyleSheet,
   Text,
@@ -10,16 +11,122 @@ import {
 } from 'react-native';
 import WebView from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import * as Location from 'expo-location';
 
 // マネコ家計簿の本体は Render 上の既存Webアプリ（cookieセッション認証込み）。
 // このExpoアプリは全画面WebViewでそれを表示するだけの「殻」。
 const HOME_URL = 'https://tabiwari-mu.vercel.app';
 const HOME_HOST = 'tabiwari-mu.vercel.app';
 
+type MapPoint = { lat: number; lng: number; title?: string | null; subtitle?: string | null };
+type NativeMapRequest = {
+  type: 'OPEN_MAP_PICKER' | 'OPEN_MAP_VIEWER';
+  requestId: string;
+  initial?: { lat: number; lng: number } | null;
+  points?: MapPoint[];
+  title?: string;
+};
+
+const DEFAULT_REGION: Region = {
+  latitude: 35.681,
+  longitude: 139.767,
+  latitudeDelta: 0.12,
+  longitudeDelta: 0.12,
+};
+
+function inviteWebUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const token = parsed.pathname.match(/\/invite\/([A-Za-z0-9_-]+)/)?.[1]
+      ?? (parsed.host === 'invite' ? parsed.pathname.replace(/^\//, '') : null);
+    return token ? `${HOME_URL}/invite/${token}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const webViewRef = useRef<WebView>(null);
+  const mapRef = useRef<MapView>(null);
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [webUri, setWebUri] = useState(HOME_URL);
+  const [mapRequest, setMapRequest] = useState<NativeMapRequest | null>(null);
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
+
+  const points = mapRequest?.points ?? [];
+  const initialRegion = useMemo<Region>(() => {
+    const p = mapRequest?.initial ?? points[0];
+    return p
+      ? { latitude: p.lat, longitude: p.lng, latitudeDelta: 0.025, longitudeDelta: 0.025 }
+      : DEFAULT_REGION;
+  }, [mapRequest]);
+
+  const openInvite = useCallback((url: string) => {
+    const next = inviteWebUrl(url);
+    if (!next) return;
+    setHasError(false);
+    setLoading(true);
+    setWebUri(next);
+  }, []);
+
+  useEffect(() => {
+    void Linking.getInitialURL().then((url) => { if (url) openInvite(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => openInvite(url));
+    return () => sub.remove();
+  }, [openInvite]);
+
+  useEffect(() => {
+    if (!mapRequest || !points.length) return;
+    const timer = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(
+        points.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+        { edgePadding: { top: 90, right: 45, bottom: 110, left: 45 }, animated: true },
+      );
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [mapRequest, points]);
+
+  const sendMapResult = useCallback((cancelled: boolean, value?: unknown) => {
+    if (!mapRequest) return;
+    const message = JSON.stringify({
+      type: 'NATIVE_MAP_RESULT',
+      requestId: mapRequest.requestId,
+      cancelled,
+      value,
+    });
+    webViewRef.current?.injectJavaScript(
+      `window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(message)}}));true;`,
+    );
+    setMapRequest(null);
+    setPicked(null);
+  }, [mapRequest]);
+
+  const useCurrentLocation = useCallback(async () => {
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== 'granted') return;
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const next = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+    setPicked(next);
+    mapRef.current?.animateToRegion({
+      latitude: next.lat,
+      longitude: next.lng,
+      latitudeDelta: 0.015,
+      longitudeDelta: 0.015,
+    });
+  }, []);
+
+  const handleWebMessage = useCallback((event: any) => {
+    try {
+      const message = JSON.parse(event.nativeEvent.data) as NativeMapRequest;
+      if (message.type !== 'OPEN_MAP_PICKER' && message.type !== 'OPEN_MAP_VIEWER') return;
+      setPicked(message.initial ?? null);
+      setMapRequest(message);
+    } catch {
+      // アプリが理解しないWebメッセージは無視する。
+    }
+  }, []);
 
   // 別オリジンへのメインフレーム遷移だけを外部ブラウザへ逃がす。
   // 地図タイルの取得などのサブリソース読み込みは isTopFrame===false、
@@ -70,13 +177,14 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <WebView
         ref={webViewRef}
-        source={{ uri: HOME_URL }}
+        source={{ uri: webUri }}
         style={styles.webview}
         // Web側が env(safe-area-inset-*) でセーフエリアを扱っているため、
         // ネイティブ側では二重に余白を足さない（'never' が既定値だが明示しておく）。
         contentInsetAdjustmentBehavior="never"
         allowsBackForwardNavigationGestures
         sharedCookiesEnabled
+        onMessage={handleWebMessage}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         onLoadEnd={() => setLoading(false)}
         onError={() => setHasError(true)}
@@ -93,6 +201,70 @@ export default function App() {
           <ActivityIndicator size="large" color="#E8B62B" />
         </View>
       )}
+      <Modal visible={!!mapRequest} animationType="slide" presentationStyle="fullScreen">
+        <View style={styles.mapContainer}>
+          <StatusBar barStyle="dark-content" />
+          <MapView
+            ref={mapRef}
+            provider={PROVIDER_GOOGLE}
+            style={StyleSheet.absoluteFill}
+            initialRegion={initialRegion}
+            showsUserLocation
+            showsMyLocationButton={false}
+            onPress={(event) => {
+              if (mapRequest?.type !== 'OPEN_MAP_PICKER') return;
+              setPicked({
+                lat: event.nativeEvent.coordinate.latitude,
+                lng: event.nativeEvent.coordinate.longitude,
+              });
+            }}
+          >
+            {points.map((point, index) => (
+              <Marker
+                key={`${point.lat}:${point.lng}:${index}`}
+                coordinate={{ latitude: point.lat, longitude: point.lng }}
+                title={point.title ?? undefined}
+                description={point.subtitle ?? undefined}
+              />
+            ))}
+            {picked && mapRequest?.type === 'OPEN_MAP_PICKER' && (
+              <Marker
+                draggable
+                coordinate={{ latitude: picked.lat, longitude: picked.lng }}
+                onDragEnd={(event) => setPicked({
+                  lat: event.nativeEvent.coordinate.latitude,
+                  lng: event.nativeEvent.coordinate.longitude,
+                })}
+                title="この場所を選択"
+              />
+            )}
+          </MapView>
+          <View style={styles.mapHeader}>
+            <TouchableOpacity style={styles.mapHeaderButton} onPress={() => sendMapResult(true)}>
+              <Text style={styles.mapHeaderButtonText}>閉じる</Text>
+            </TouchableOpacity>
+            <Text style={styles.mapTitle}>{mapRequest?.title ?? (mapRequest?.type === 'OPEN_MAP_PICKER' ? '場所を選ぶ' : '買い物マップ')}</Text>
+            <View style={styles.mapHeaderSpacer} />
+          </View>
+          {mapRequest?.type === 'OPEN_MAP_PICKER' && (
+            <View style={styles.mapBottomSheet}>
+              <Text style={styles.mapHint}>地図をタップしてピンを置けます</Text>
+              <View style={styles.mapActions}>
+                <TouchableOpacity style={styles.locationButton} onPress={useCurrentLocation}>
+                  <Text style={styles.locationButtonText}>📍 現在地</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmButton, !picked && styles.disabledButton]}
+                  disabled={!picked}
+                  onPress={() => picked && sendMapResult(false, picked)}
+                >
+                  <Text style={styles.confirmButtonText}>この場所に決定</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -144,5 +316,90 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#3a2a00',
+  },
+  mapContainer: {
+    flex: 1,
+    backgroundColor: '#f7f4ee',
+  },
+  mapHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 54,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd5c8',
+  },
+  mapHeaderButton: {
+    minWidth: 58,
+    paddingVertical: 8,
+  },
+  mapHeaderButtonText: {
+    color: '#6a5522',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  mapHeaderSpacer: {
+    width: 58,
+  },
+  mapTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#302a24',
+  },
+  mapBottomSheet: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 28,
+    padding: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  mapHint: {
+    marginBottom: 12,
+    textAlign: 'center',
+    color: '#615a51',
+    fontSize: 13,
+  },
+  mapActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  locationButton: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: '#f1ede5',
+  },
+  locationButtonText: {
+    color: '#4a4238',
+    fontWeight: '700',
+  },
+  confirmButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#e8b62b',
+  },
+  disabledButton: {
+    opacity: 0.45,
+  },
+  confirmButtonText: {
+    color: '#3a2a00',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

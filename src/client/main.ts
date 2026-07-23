@@ -13,6 +13,7 @@ import { stageBackdrop } from './stage';
 import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
 import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
+import { hasNativeMap, openNativeMapPicker, openNativeMapViewer } from './native-map';
 
 declare const L: any;
 declare const Chart: any;
@@ -33,6 +34,7 @@ let mapInstance: any = null;
 let tripTab: 'summary' | 'add' | 'list' | 'memory' | 'map' | 'analytics' = 'summary';
 let currentUser: User | null = null;
 let myGroups: Group[] = [];
+let activeGroupId: number | null = null;
 let editingReceiptId: number | null = null;
 
 // ホームのタブの状態
@@ -336,36 +338,77 @@ function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement) {
   canvas.append(overlay);
 }
 
-// グループ管理（一覧・作成・招待コードで参加）
+function spaceSwitcher(mode: AppMode): HTMLElement | null {
+  if (!myGroups.length) return null;
+  const select = el('select', { class: 'space-select', 'aria-label': '家計簿スペース' } as any,
+    myGroups.map((g) => el('option', { value: String(g.id), textContent: mode === 'kids' ? `👛 ${g.name}` : `🏠 ${g.name}` })));
+  select.value = String(activeGroupId ?? myGroups[0].id);
+  select.addEventListener('change', async () => {
+    const groupId = Number(select.value);
+    select.disabled = true;
+    try {
+      await api.saveSettings({ active_group_id: groupId });
+      activeGroupId = groupId;
+      overviewCache = null;
+      recentCache = null;
+      incomesCache = null;
+      await renderHome();
+    } catch (e) {
+      select.disabled = false;
+      alert((e as Error).message);
+    }
+  });
+  return el('div', { class: 'space-switcher' }, [select]);
+}
+
+// 家計簿スペース管理（一覧・作成・招待URLで参加）
 function groupsCard(groups: Group[]) {
   const list = groups.length
     ? el('ul', { class: 'group-list' }, groups.map((g) =>
-        el('li', {}, [
+        (() => {
+          const invite = el('button', { type: 'button', class: 'link-btn', textContent: '招待リンクを共有' });
+          invite.addEventListener('click', async () => {
+            invite.disabled = true;
+            try {
+              const result = await api.createGroupInvite(g.id);
+              const shareData = { title: 'マネコ家計簿への招待', text: `${g.name}に参加しよう`, url: result.url };
+              if (navigator.share) await navigator.share(shareData);
+              else {
+                await navigator.clipboard.writeText(result.url);
+                alert('招待リンクをコピーしました');
+              }
+            } catch (e) {
+              // 共有シートを閉じた場合はエラー表示しない。
+              if ((e as Error).name !== 'AbortError') alert((e as Error).message);
+            } finally { invite.disabled = false; }
+          });
+          return el('li', {}, [
           el('strong', { textContent: g.name }),
-          el('span', { class: 'muted', textContent: ` ・ メンバー${g.members ?? '-'}人 ・ 招待コード ` }),
-          el('code', { class: 'invite', textContent: g.invite_code }),
-        ])
+          el('span', { class: 'muted', textContent: ` ・ メンバー${g.members ?? '-'}人 ` }),
+          invite,
+          ]);
+        })()
       ))
-    : el('p', { class: 'muted', textContent: 'まだグループがありません。作成するか、家族からもらった招待コードで参加してください。' });
+    : el('p', { class: 'muted', textContent: 'まだ家計簿スペースがありません。新しく作成してください。' });
 
-  const newName = el('input', { placeholder: '例: 我が家' });
+  const newName = el('input', { placeholder: '例: ふたりの家計簿' });
   const createBtn = el('button', { type: 'button', class: 'primary', textContent: '作成' });
   createBtn.addEventListener('click', async () => {
     if (!newName.value.trim()) return alert('グループ名を入力してください。');
-    try { await api.createGroup(newName.value.trim()); await renderHome(); } catch (e) { alert((e as Error).message); }
+    try {
+      const created = await api.createGroup(newName.value.trim());
+      myGroups = await api.listGroups();
+      activeGroupId = created.id;
+      await api.saveSettings({ active_group_id: created.id });
+      overviewCache = null; recentCache = null;
+      await renderHome();
+    } catch (e) { alert((e as Error).message); }
   });
-  const code = el('input', { placeholder: '招待コード' });
-  const joinBtn = el('button', { type: 'button', textContent: '参加' });
-  joinBtn.addEventListener('click', async () => {
-    if (!code.value.trim()) return alert('招待コードを入力してください。');
-    try { await api.joinGroup(code.value.trim()); await renderHome(); } catch (e) { alert((e as Error).message); }
-  });
-
   return el('section', { class: 'card', id: 'groups-sec' }, [
-    el('h2', { textContent: '👪 グループ（家族の共有単位）' }),
+    el('h2', { textContent: '🏠 家計簿スペース' }),
+    el('p', { class: 'muted', textContent: '自分用、ふたり用、家族用など複数作れます。ホーム上部でワンタップ切り替えできます。' }),
     list,
-    el('div', { class: 'row' }, [labeled('新規グループを作る', newName), createBtn]),
-    el('div', { class: 'row' }, [labeled('招待コードで参加', code), joinBtn]),
+    el('div', { class: 'row' }, [labeled('新しいスペースを作る', newName), createBtn]),
   ]);
 }
 
@@ -382,7 +425,7 @@ async function renderHome() {
 
   // overview はモード判定に必須。失敗したら復帰導線つきエラーを出す
   try {
-    if (!overviewCache) overviewCache = await api.overview();
+    if (!overviewCache) overviewCache = await api.overview(activeGroupId ?? undefined);
   } catch (e) {
     const retry = el('button', { class: 'primary', textContent: 'もう一度読み込む' });
     retry.addEventListener('click', () => { void renderHome(); });
@@ -395,6 +438,7 @@ async function renderHome() {
   }
   if (epoch !== renderEpoch) return; // すでに新しい描画が始まっている
   const o = overviewCache;
+  activeGroupId = o.settings?.active_group_id ?? activeGroupId ?? myGroups[0]?.id ?? null;
   if (!o.settings) { renderUsagePicker(null); return; }
   if (o.settings.usage_type == null) { renderUsagePicker(o.settings); return; } // 既存ユーザーも初回だけ利用タイプを選ばせる（mode は保持）
   const mode: AppMode = o.settings.mode;
@@ -417,7 +461,7 @@ async function renderHome() {
   const incomesP = homeTab === 'report' && !incomesCache ? api.listIncomes().catch(() => null) : null;
   let recentFailed = false;
   if (!recentCache) {
-    try { recentCache = (await api.recentExpenses(366)).receipts; }
+    try { recentCache = (await api.recentExpenses(366, activeGroupId ?? undefined)).receipts; }
     catch { recentFailed = true; }
   }
   if (incomesP) {
@@ -477,6 +521,9 @@ async function renderHome() {
 
   if (epoch !== renderEpoch) return; // 古い描画は捨てる（settingsPanel の await 対策）
   app().replaceChildren(...panels);
+  const switcher = spaceSwitcher(mode);
+  const canvas = panels[0]?.querySelector<HTMLElement>('.pc-canvas') ?? panels[0];
+  if (switcher && canvas) canvas.append(switcher);
   window.scrollTo({ top: 0 });
 
   // 初回チュートリアル（利用タイプ選択の直後・ホームで1回だけ）。月初サマリーと同時に出さないよう優先。
@@ -786,18 +833,39 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   logout.addEventListener('click', async () => {
     await api.logout();
     stopEventsPolling();
-    currentUser = null; myGroups = [];
+    currentUser = null; myGroups = []; activeGroupId = null;
     overviewCache = null; recentCache = null; incomesCache = null;
     document.body.classList.remove('theme-kids', 'theme-adult');
     renderAuth();
   });
-  const logoutSec = el('section', { class: 'card' }, [el('h2', { textContent: 'アカウント' }), logout]);
+  const deleteAccount = el('button', { class: 'link-btn danger', textContent: 'アカウントを削除' });
+  deleteAccount.addEventListener('click', async () => {
+    const password = prompt('確認のため、現在のパスワードを入力してください');
+    if (!password) return;
+    if (!confirm('アカウントと自分専用の家計データを完全に削除します。この操作は取り消せません。')) return;
+    deleteAccount.disabled = true;
+    try {
+      await api.deleteAccount(password);
+      stopEventsPolling();
+      currentUser = null; myGroups = []; activeGroupId = null;
+      overviewCache = null; recentCache = null; incomesCache = null;
+      renderAuth();
+    } catch (e) {
+      deleteAccount.disabled = false;
+      alert((e as Error).message);
+    }
+  });
+  const logoutSec = el('section', { class: 'card' }, [
+    el('h2', { textContent: 'アカウント' }),
+    el('div', { class: 'row' }, [logout, deleteAccount]),
+    el('p', { class: 'muted', textContent: '削除すると、自分だけの家計簿データも削除され、元に戻せません。共有スペースは他のメンバーに残ります。' }),
+  ]);
 
   // 👨‍👩‍👧 かぞくと つながる（親子アカウント連携）。個人利用では非表示（データは消さない）。
   const familySec = isPersonal ? null : await familyLinkCard(mode, o);
 
-  // 1アカウント・1デバイスのシンプル構成（プロジェクト/グループ管理はUIから外した）
-  return [modeSec, usageSec, ...(familySec ? [familySec] : []), moneySec, logoutSec];
+  const spacesSec = groupsCard(myGroups);
+  return [modeSec, spacesSec, usageSec, ...(familySec ? [familySec] : []), moneySec, logoutSec];
 }
 
 // --- 👨‍👩‍👧 親子アカウント連携 --------------------------------------------
@@ -1073,10 +1141,15 @@ const KIDS_CATEGORIES = ['おかし', 'ごはん', 'おもちゃ・ゲーム', '
 
 function quickAddPanel(mode: AppMode): HTMLElement[] {
   const kids = mode === 'kids';
+  const groupSelect = el('select', { class: 'quick-space-select' },
+    myGroups.map((g) => el('option', { value: String(g.id), textContent: kids ? `👛 ${g.name}` : `🏠 ${g.name}` })));
+  if (activeGroupId) groupSelect.value = String(activeGroupId);
   // おとなは詳細フォーム（店・場所・写真・複数明細＋自動ジャンル）がデフォルト
   if (!kids) {
     return adultAddForm({
       pickPlace: () => openMapPicker(null),
+      spaces: myGroups,
+      activeSpaceId: activeGroupId,
       onSaved: (res) => {
         pendingCelebrate = { kind: 'generic', name: res.name, reward: res.reward };
         recentCache = null;
@@ -1163,6 +1236,7 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
   const form = el('form', { class: 'card quick-card' }, [
     el('h2', { textContent: kids ? '✏️ おかいものメモ' : '✏️ きろく（かんたん記録）' }),
     el('p', { class: 'muted', textContent: kids ? 'なまえと金額だけでOK。きろくするとマネコがよろこぶよ！' : '品名と金額だけでOK。マネコがホームで反応するよ。' }),
+    labeled(kids ? 'どのおさいふに入れる?' : '保存先の家計簿', groupSelect),
     ocrBtn,
     ocrInput,
     el('p', { class: 'muted af-ocr-note', textContent: kids ? 'レシートは よみとりに つかうだけ。しゃしんは ほぞんしないよ。' : 'レシートは読み取りに使うだけで、画像は保存しません。' }),
@@ -1183,7 +1257,14 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
     if (!items.length) { alert('品名と金額を入力してにゃ'); return; }
     saveBtn.disabled = true;
     try {
-      const res = await api.quickExpense({ store_name: storeInput.value.trim() || undefined, category, purchased_on: dateInput.value || todayIso(), items });
+      const selectedGroupId = Number(groupSelect.value) || activeGroupId || undefined;
+      const res = await api.quickExpense({
+        group_id: selectedGroupId,
+        store_name: storeInput.value.trim() || undefined,
+        category,
+        purchased_on: dateInput.value || todayIso(),
+        items,
+      });
       // ホームに戻ってマネコがお祝い（ごほうびも一緒に表示）
       const pseudo = { store_name: storeInput.value, category, items, trip_title: '', purchased_on: dateInput.value } as unknown as RecentReceipt;
       pendingCelebrate = { kind: reactionFor(pseudo), name: items[0].name, reward: res.reward };
@@ -1336,14 +1417,23 @@ function genreReportSec(recent: RecentReceipt[]): HTMLElement {
 function mapPanel(recent: RecentReceipt[]): HTMLElement {
   const pinned = recent.filter((r) => r.lat != null && r.lng != null);
   const mapDiv = el('div', { class: 'report-map', id: 'report-map' });
+  const nativeBtn = el('button', { type: 'button', class: 'primary native-map-button', textContent: '🗺 Googleマップで見る' });
+  nativeBtn.addEventListener('click', () => {
+    void openNativeMapViewer(pinned.map((r) => ({
+      lat: r.lat!,
+      lng: r.lng!,
+      title: r.store_name || '買い物',
+      subtitle: `${fmtDate(r.purchased_on)}・${yen(r.total)}`,
+    })), '買い物マップ');
+  });
   const sec = el('section', { class: 'card' }, [
     el('h2', { textContent: '🗺 買い物マップ' }),
     pinned.length
-      ? mapDiv
+      ? (hasNativeMap() ? nativeBtn : mapDiv)
       : el('p', { class: 'muted', textContent: 'まだ場所つきの記録がありません。きろくの「🗺 場所を選ぶ」で買った場所にピンが立ちます。' }),
     ...(pinned.length ? [el('p', { class: 'muted', textContent: 'ピンをタップすると、その買い物の明細と思い出写真が開きます。' })] : []),
   ]);
-  if (pinned.length) {
+  if (pinned.length && !hasNativeMap()) {
     requestAnimationFrame(() => {
       if (!byId('report-map') || typeof L === 'undefined') return;
       const map = L.map('report-map');
@@ -1878,6 +1968,25 @@ function loadGoogleMaps(key: string): Promise<any> {
 
 async function initMap(d: TripDetail, nameOf: (id: number | null) => string) {
   lastMapCtx = { d, nameOf };
+  if (hasNativeMap()) {
+    const elc = byId('trip-map');
+    if (!elc) return;
+    const pinned = d.receipts.filter((r) => r.lat != null && r.lng != null);
+    const button = el('button', { type: 'button', class: 'primary native-map-button', textContent: '🗺 Googleマップで見る' });
+    button.addEventListener('click', () => {
+      void openNativeMapViewer(pinned.map((r) => ({
+        lat: r.lat!,
+        lng: r.lng!,
+        title: r.store_name || '買い物',
+        subtitle: `${fmtDate(r.purchased_on)}・${yen(r.total)}`,
+      })), d.trip.title);
+    });
+    elc.replaceWith(el('div', { class: 'native-map-placeholder' }, [
+      el('p', { class: 'muted', textContent: pinned.length ? `${pinned.length}件の場所つき記録があります。` : '場所つきの記録はまだありません。' }),
+      button,
+    ]));
+    return;
+  }
   try {
     const key = await getMapsKey();
     if (!key) throw new Error('no key');
@@ -1928,6 +2037,13 @@ function renderLeafletMap(d: TripDetail, nameOf: (id: number | null) => string) 
 // --- 場所ピッカー（tabikake 移植：タップ/検索/現在地でピンを決める） ----
 type Picked = { lat: number; lng: number; name: string | null };
 async function openMapPicker(initial: { lat: number; lng: number } | null): Promise<Picked | null> {
+  const native = openNativeMapPicker(initial);
+  if (native) {
+    const point = await native;
+    if (!point) return null;
+    const place = await reverseGeocode(point.lat, point.lng);
+    return { ...point, name: place.name || null };
+  }
   const start = initial ?? { lat: 35.681, lng: 139.767 };
   let picked: { lat: number; lng: number } | null = initial ? { ...initial } : null;
   let pickedName: string | null = null;
@@ -2293,11 +2409,19 @@ function dateRange(a: string | null, b: string | null) {
 }
 
 // --- 認証ゲート -------------------------------------------------------
+function inviteTokenFromLocation(): string | null {
+  const path = location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)\/?$/)?.[1];
+  const query = new URLSearchParams(location.search).get('invite');
+  return path ?? query;
+}
+
 function renderAuth() {
   // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
   document.documentElement.style.background = document.body.style.background = '';
   let mode: 'login' | 'register' = 'login';
-  const username = el('input', { name: 'username', placeholder: 'ユーザー名', autocomplete: 'username' });
+  const email = el('input', { name: 'email', type: 'text', placeholder: 'name@example.com', autocomplete: 'username' });
+  const displayName = el('input', { name: 'display_name', placeholder: 'マネコに表示する名前', autocomplete: 'name' });
+  const displayNameField = labeled('表示名', displayName);
   const password = el('input', { name: 'password', type: 'password', placeholder: 'パスワード', autocomplete: 'current-password' });
   const errBox = el('p', { class: 'status err', style: 'display:none' as any });
   const submit = el('button', { type: 'submit', class: 'primary', textContent: 'ログイン' });
@@ -2308,14 +2432,22 @@ function renderAuth() {
     mode = m;
     heading.textContent = submit.textContent = m === 'login' ? 'ログイン' : '新規登録';
     toggle.textContent = m === 'login' ? 'アカウントを作る' : 'ログインに戻る';
+    displayNameField.style.display = m === 'register' ? '' : 'none';
+    email.type = m === 'register' ? 'email' : 'text';
+    email.placeholder = m === 'register' ? 'name@example.com' : 'メールアドレス（旧ユーザーはユーザー名）';
+    password.setAttribute('autocomplete', m === 'register' ? 'new-password' : 'current-password');
     errBox.style.display = 'none';
   };
   toggle.addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
+  setMode('login');
 
   const form = el('form', { class: 'card auth-card' }, [
     heading,
-    el('p', { class: 'muted', textContent: '家族でグループを共有して、旅行も日常も一緒に記録できます。' }),
-    labeled('ユーザー名', username),
+    el('p', { class: 'muted', textContent: inviteTokenFromLocation()
+      ? '招待された家計簿スペースに参加するには、ログインまたは新規登録してください。'
+      : '家計簿スペースを共有して、ふたりでも家族でも一緒に記録できます。' }),
+    labeled('メールアドレス', email),
+    displayNameField,
     labeled('パスワード', password),
     errBox,
     el('div', { class: 'row between' }, [toggle, submit]),
@@ -2325,8 +2457,8 @@ function renderAuth() {
     errBox.style.display = 'none';
     try {
       const res = mode === 'login'
-        ? await api.login({ username: username.value, password: password.value })
-        : await api.register({ username: username.value, password: password.value });
+        ? await api.login({ email: email.value, password: password.value })
+        : await api.register({ email: email.value, display_name: displayName.value, password: password.value });
       currentUser = res.user;
       await boot();
     } catch (err) {
@@ -2344,6 +2476,19 @@ async function boot() {
   if (!me) { currentUser = null; renderAuth(); return; }
   currentUser = me.user;
   myGroups = me.groups;
+  const inviteToken = inviteTokenFromLocation();
+  if (inviteToken) {
+    try {
+      const joined = await api.joinInvite(inviteToken);
+      myGroups = await api.listGroups();
+      activeGroupId = joined.id;
+      history.replaceState({}, '', '/');
+      enqueueAppToast(`🏠「${joined.name}」に参加しました`);
+    } catch (e) {
+      alert((e as Error).message);
+      history.replaceState({}, '', '/');
+    }
+  }
   route();
 }
 

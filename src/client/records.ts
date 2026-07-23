@@ -138,19 +138,26 @@ function openGenrePicker(anchor: HTMLElement, current: string | null, onPick: (g
 // ---- おとなの詳細きろくフォーム -----------------------------------------
 export interface AddFormArgs {
   pickPlace(): Promise<{ lat: number; lng: number; name: string | null } | null>;
+  spaces: { id: number; name: string }[];
+  activeSpaceId: number | null;
   onSaved(res: { name: string; reward: any }): void;
 }
 
 export function adultAddForm(a: AddFormArgs): HTMLElement[] {
+  const spaceSelect = el('select', { class: 'quick-space-select' },
+    a.spaces.map((s) => el('option', { value: String(s.id), textContent: `🏠 ${s.name}` })));
+  if (a.activeSpaceId) spaceSelect.value = String(a.activeSpaceId);
   // お店・日付・場所
   const storeInput = el('input', { class: 'grow', placeholder: 'お店（例: スーパーまるやま）' });
   const dateInput = el('input', { type: 'date', value: todayIso() });
   let place: { lat: number; lng: number; name: string | null } | null = null;
   const placeChip = el('span', { class: 'af-place', textContent: '' });
+  const detected = el('span', { class: 'af-place-detected', textContent: '' });
   const placeBtn = el('button', { type: 'button', textContent: '🗺 場所を選ぶ' });
   const placeClear = el('button', { type: 'button', class: 'link-btn', textContent: '消す' });
   const syncPlace = () => {
     placeChip.textContent = place ? `📍 ${place.name ?? `${place.lat.toFixed(3)}, ${place.lng.toFixed(3)}`}` : '';
+    detected.textContent = '';
     placeClear.style.display = place ? '' : 'none';
   };
   placeBtn.addEventListener('click', async () => {
@@ -243,6 +250,7 @@ export function adultAddForm(a: AddFormArgs): HTMLElement[] {
             if (hits.length) {
               place = { lat: hits[0].lat, lng: hits[0].lon, name: r.store_name || hits[0].name || null };
               syncPlace();
+              detected.textContent = `✓ レシートから場所を見つけました。地図で確認・変更できます`;
             }
           } catch { /* 自動ピンは失敗しても無視 */ }
         }
@@ -296,11 +304,13 @@ export function adultAddForm(a: AddFormArgs): HTMLElement[] {
   const form = el('form', { class: 'card af-card' }, [
     el('h2', { textContent: '✏️ きろく' }),
     el('p', { class: 'muted', textContent: 'ジャンルは自動でつきます（あとから直せます）。' }),
+    labeled('保存先の家計簿', spaceSelect),
     ocrBtn,
     ocrInput,
     el('p', { class: 'muted af-ocr-note', textContent: 'レシートは読み取りに使うだけで、画像は保存しません。' }),
     el('div', { class: 'row' }, [labeled('お店', storeInput), labeled('日付', dateInput)]),
     el('div', { class: 'row af-place-row' }, [placeBtn, placeChip, placeClear]),
+    detected,
     el('div', { class: 'af-rows-head' }, [el('span', { textContent: '明細' }), el('span', {}, ['合計 ', totalEl])]),
     rowsWrap,
     addRowBtn,
@@ -318,6 +328,7 @@ export function adultAddForm(a: AddFormArgs): HTMLElement[] {
     saveBtn.disabled = true;
     try {
       const res = await api.quickExpense({
+        group_id: Number(spaceSelect.value) || a.activeSpaceId || undefined,
         store_name: storeInput.value.trim() || undefined,
         purchased_on: dateInput.value || todayIso(),
         items,

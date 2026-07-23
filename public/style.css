@@ -272,6 +272,41 @@ button.primary:hover { filter: brightness(1.06); background: var(--accent); }
 .group-list li { padding: 6px 0; border-bottom: 1px solid #f0f0ee; font-size: 14px; }
 .group-list li:last-child { border-bottom: none; }
 .invite { background: var(--accent-weak); color: var(--accent); padding: 1px 8px; border-radius: 6px; font-size: 13px; user-select: all; }
+
+/* TimeTree風の家計簿スペース切替。全タブの同じ位置に固定し、選択状態を共有する。 */
+.space-switcher {
+  position: absolute;
+  z-index: 2600;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+.space-select,
+.quick-space-select {
+  max-width: 230px;
+  border: 1px solid rgba(90, 70, 35, .14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .94);
+  color: #352d24;
+  box-shadow: 0 5px 18px rgba(55, 42, 20, .13);
+  padding: 8px 30px 8px 13px;
+  font-weight: 800;
+  font-size: 12px;
+}
+.theme-kids .space-select {
+  background: rgba(255, 250, 225, .95);
+  border: 2px solid rgba(135, 96, 20, .35);
+  color: #5b421a;
+}
+.af-place-detected {
+  display: block;
+  min-height: 18px;
+  margin: -2px 0 8px;
+  color: #24784d;
+  font-size: 12px;
+  font-weight: 700;
+}
 .card-group { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 /* 思い出写真グリッド */

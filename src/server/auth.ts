@@ -84,37 +84,47 @@ async function createSession(res: Response, userId: number) {
 
 // ---- ルート -----------------------------------------------------------
 auth.post('/register', async (req, res) => {
-  const { username, password } = req.body ?? {};
-  if (typeof username !== 'string' || username.trim().length < 2) {
-    return res.status(400).json({ error: 'ユーザー名は2文字以上で入力してください' });
+  const { email, display_name, username, password } = req.body ?? {};
+  const displayName = typeof display_name === 'string' ? display_name.trim()
+    : typeof username === 'string' ? username.trim() : '';
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: '有効なメールアドレスを入力してください' });
   }
-  if (typeof password !== 'string' || password.length < 4) {
-    return res.status(400).json({ error: 'パスワードは4文字以上で入力してください' });
+  if (displayName.length < 2 || displayName.length > 30) {
+    return res.status(400).json({ error: '表示名は2〜30文字で入力してください' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
   }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // username列は旧版互換の内部IDとして残す。画面表示にはdisplay_nameだけを使う。
+    const internalUsername = `u_${crypto.randomBytes(12).toString('hex')}`;
     const { rows } = await client.query(
-      `INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username`,
-      [username.trim(), hashPassword(password)]
+      `INSERT INTO users (username, email, display_name, password_hash)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email, display_name, display_name AS username`,
+      [internalUsername, normalizedEmail, displayName, hashPassword(password)]
     );
     const userId = rows[0].id;
     // 個人利用にすぐ使えるよう、登録時に自分用グループを自動作成（共有は後から招待でOK）
     const code = crypto.randomBytes(16).toString('hex');
     const g = await client.query(
       `INSERT INTO user_groups (name, invite_code) VALUES ($1, $2) RETURNING id`,
-      [`${username.trim()}の家計簿`, code]
+      [`${displayName}の家計簿`, code]
     );
     await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
     await client.query('COMMIT');
     // 登録は自動ログインを兼ねるので、初回ログインとして記録する
     await pool.query(`UPDATE users SET last_login_at = now(), login_count = 1 WHERE id = $1`, [userId]);
-    console.log(`[auth] register: ${rows[0].username} (id ${userId})`);
+    console.log(`[auth] register: ${normalizedEmail} (id ${userId})`);
     await createSession(res, userId);
     res.status(201).json({ user: rows[0] });
   } catch (e: any) {
     await client.query('ROLLBACK');
-    if (e?.code === '23505') return res.status(409).json({ error: 'そのユーザー名は既に使われています' });
+    if (e?.code === '23505') return res.status(409).json({ error: 'そのメールアドレスは既に登録されています' });
     console.error(e);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   } finally {
@@ -123,23 +133,28 @@ auth.post('/register', async (req, res) => {
 });
 
 auth.post('/login', async (req, res) => {
-  const { username, password } = req.body ?? {};
-  if (typeof username !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({ error: 'ユーザー名とパスワードを入力してください' });
+  const { email, username, password } = req.body ?? {};
+  // 旧ユーザーはメール未登録なので、移行期間中は従来のユーザー名でもログインできる。
+  const identifier = typeof email === 'string' ? email.trim() : typeof username === 'string' ? username.trim() : '';
+  if (!identifier || typeof password !== 'string') {
+    return res.status(400).json({ error: 'メールアドレスとパスワードを入力してください' });
   }
   try {
     const { rows } = await pool.query(
-      `SELECT id, username, password_hash FROM users WHERE username = $1`,
-      [username.trim()]
+      `SELECT id, username, email, display_name, password_hash
+         FROM users
+        WHERE lower(email) = lower($1) OR username = $1
+        LIMIT 1`,
+      [identifier]
     );
     const u = rows[0];
     if (!u || !verifyPassword(password, u.password_hash)) {
-      return res.status(401).json({ error: 'ユーザー名またはパスワードが違います' });
+      return res.status(401).json({ error: 'メールアドレスまたはパスワードが違います' });
     }
     await pool.query(`UPDATE users SET last_login_at = now(), login_count = login_count + 1 WHERE id = $1`, [u.id]);
-    console.log(`[auth] login: ${u.username} (id ${u.id})`);
+    console.log(`[auth] login: ${u.email ?? u.username} (id ${u.id})`);
     await createSession(res, u.id);
-    res.json({ user: { id: u.id, username: u.username } });
+    res.json({ user: { id: u.id, email: u.email, username: u.display_name ?? u.username } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
@@ -153,12 +168,79 @@ auth.post('/logout', async (req, res) => {
   res.status(204).end();
 });
 
+// App Store要件: アプリ内でアカウントと関連データを完全削除できる。
+// 誤操作・セッション乗っ取り対策として現在のパスワードを再確認する。
+auth.delete('/account', async (req, res) => {
+  const userId = (req as any).userId as number | undefined;
+  const { password } = req.body ?? {};
+  if (!userId) return res.status(401).json({ error: 'ログインが必要です' });
+  if (typeof password !== 'string') return res.status(400).json({ error: 'パスワードを入力してください' });
+  try {
+    const { rows } = await pool.query(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+    if (!rows[0] || !verifyPassword(password, rows[0].password_hash)) {
+      return res.status(401).json({ error: 'パスワードが違います' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 本人しかいないスペースは家計データごと削除。共有中のスペースは他メンバーのため残し、
+      // 本人のmembershipだけがusersのCASCADEで外れる。
+      await client.query(
+        `DELETE FROM user_groups g
+          WHERE EXISTS (
+            SELECT 1 FROM group_members mine WHERE mine.group_id = g.id AND mine.user_id = $1
+          )
+            AND NOT EXISTS (
+            SELECT 1 FROM group_members other WHERE other.group_id = g.id AND other.user_id <> $1
+          )`,
+        [userId]
+      );
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    clearSessionCookie(res);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'アカウントを削除できませんでした' });
+  }
+});
+
+// 招待URLを未ログインでもプレビューできる。トークン自体以外の個人情報は返さない。
+auth.get('/invites/:token', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT g.name, gi.expires_at
+         FROM group_invites gi
+         JOIN user_groups g ON g.id = gi.group_id
+        WHERE gi.token = $1
+          AND gi.revoked_at IS NULL
+          AND gi.expires_at > now()
+          AND gi.use_count < gi.max_uses`,
+      [req.params.token]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'この招待は無効または期限切れです' });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  }
+});
+
 // 現在のユーザー＋所属グループ
 auth.get('/me', async (req, res) => {
   const userId = (req as any).userId as number | undefined;
   if (!userId) return res.status(401).json({ error: '未ログイン' });
   try {
-    const userQ = await pool.query(`SELECT id, username FROM users WHERE id = $1`, [userId]);
+    const userQ = await pool.query(
+      `SELECT id, email, COALESCE(display_name, username) AS username FROM users WHERE id = $1`,
+      [userId]
+    );
     if (!userQ.rows[0]) return res.status(401).json({ error: '未ログイン' });
     const groupsQ = await pool.query(
       `SELECT g.id, g.name, g.invite_code, gm.role
