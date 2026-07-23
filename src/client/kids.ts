@@ -195,7 +195,7 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     </div>
 
     <!-- せかいをみる（RPGの旅マップへ）。現在ステージ＆％も表示 -->
-    <div id="k-journey" class="hv" style="position:absolute;left:50%;top:445px;transform:translateX(-50%);z-index:9;cursor:pointer;background:linear-gradient(180deg,#FFE9A8,#FFD54A);border:2.5px solid #E8B62B;border-radius:999px;padding:7px 15px;box-shadow:0 6px 16px rgba(150,95,10,.42);display:flex;align-items:center;gap:7px;white-space:nowrap">
+    <div id="k-journey" class="hv" style="position:absolute;left:50%;top:300px;transform:translateX(-50%);z-index:9;cursor:pointer;background:linear-gradient(180deg,#FFE9A8,#FFD54A);border:2.5px solid #E8B62B;border-radius:999px;padding:7px 15px;box-shadow:0 6px 16px rgba(150,95,10,.42);display:flex;align-items:center;gap:7px;white-space:nowrap">
       <span style="font-size:15px">🗺</span>
       <span style="font-size:12.5px;font-weight:800;color:#7A4A00">せかいを みにいく</span>
       <span style="font-size:11px;font-weight:800;color:#B9506E;background:#FFF7DE;border-radius:999px;padding:1px 8px">${esc(STAGES[jStage].name)} ${jPct}%</span>
