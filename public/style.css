@@ -1555,3 +1555,529 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 .tut-prev { background: none; border: none; color: #8C8375; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 .tut-prev:disabled { visibility: hidden; }
 .tut-next { flex: 1; max-width: 160px; }
+/* ======================================================================
+   Maneko Town v4 — savings-driven town, journey and four-tab experience
+   ====================================================================== */
+.kids-home-v3 {
+  position: relative;
+  width: 402px;
+  height: 840px;
+  overflow: hidden;
+  isolation: isolate;
+  color: #3d2f22;
+  font-family: "M PLUS Rounded 1c", sans-serif;
+  background: #d8ebf1;
+}
+.kids-home-v3-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  background-position: center 50%;
+  background-size: cover;
+  background-repeat: no-repeat;
+  transform: scale(1.035);
+  filter: saturate(.98) contrast(.98);
+}
+.kids-home-v3.stage-0 .kids-home-v3-bg { background-position: center 48%; }
+.kids-home-v3.stage-1 .kids-home-v3-bg { background-position: center 51%; }
+.kids-home-v3.stage-2 .kids-home-v3-bg { background-position: center 52%; }
+.kids-home-v3.stage-3 .kids-home-v3-bg { background-position: center 53%; }
+.kids-home-v3.stage-4 .kids-home-v3-bg { background-position: center 55%; }
+.kids-home-v3-shade {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(26,35,44,.3), rgba(26,35,44,0) 26%),
+    linear-gradient(0deg, rgba(48,31,15,.28), rgba(48,31,15,0) 30%);
+}
+.kids-home-v3-header {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: calc(48px + env(safe-area-inset-top));
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.kids-wallet-chip,
+.kids-map-chip,
+.kids-goal-strip {
+  border: 1px solid rgba(255,255,255,.82);
+  background: rgba(255,250,239,.87);
+  color: #3d2f22;
+  box-shadow: 0 8px 24px rgba(39,25,12,.2);
+  backdrop-filter: blur(15px) saturate(1.1);
+  -webkit-backdrop-filter: blur(15px) saturate(1.1);
+}
+.kids-wallet-chip,
+.kids-map-chip {
+  min-height: 40px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  cursor: pointer;
+}
+.kids-wallet-chip { flex-direction: column; align-items: flex-start; gap: 0; }
+.kids-wallet-chip span { font-size: 9px; font-weight: 800; color: #7b684e; }
+.kids-wallet-chip strong { font-size: 14px; line-height: 1.2; }
+.kids-map-chip { font-size: 12px; font-weight: 800; }
+.kids-goal-strip {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: calc(100px + env(safe-area-inset-top));
+  z-index: 20;
+  padding: 10px 12px;
+  border-radius: 16px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.kids-goal-strip-top,
+.kids-goal-meta { display: flex; justify-content: space-between; align-items: center; }
+.kids-goal-strip-top strong {
+  max-width: 80%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.kids-goal-strip-top b { color: #25745a; font-size: 12px; }
+.kids-goal-track {
+  display: block;
+  height: 7px;
+  margin: 6px 0 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(101,83,52,.18);
+}
+.kids-goal-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg,#80c779,#36a374);
+  box-shadow: 0 0 10px rgba(54,163,116,.38);
+}
+.kids-goal-meta { font-size: 9.5px; font-weight: 700; color: #7b684e; }
+.kids-town-open {
+  position: absolute;
+  inset: 168px 0 145px;
+  width: 100%;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.kids-maneko-v3 {
+  position: absolute;
+  left: 50%;
+  bottom: var(--walk-to-y);
+  width: 184px;
+  height: 255px;
+  z-index: 8;
+  transform: translateX(-50%) scale(var(--walk-to-scale));
+  transform-origin: bottom center;
+  cursor: pointer;
+  filter: drop-shadow(0 10px 9px rgba(48,29,10,.28));
+}
+.kids-maneko-v3.is-moving {
+  animation: maneko-walk-forward 1.8s cubic-bezier(.2,.75,.3,1) both;
+}
+.kids-maneko-v3.is-tapped img { animation: maneko-hop .72s ease; }
+.kids-maneko-v3 img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.kids-maneko-v3-shadow {
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  bottom: 7px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(39,27,16,.36);
+  filter: blur(6px);
+}
+@keyframes maneko-walk-forward {
+  0% { bottom: var(--walk-from-y); transform: translateX(-50%) translateX(-4px) scale(var(--walk-from-scale)); }
+  18% { transform: translateX(-50%) translateX(5px) translateY(-8px) scale(var(--walk-from-scale)); }
+  38% { transform: translateX(-50%) translateX(-4px) scale(var(--walk-from-scale)); }
+  58% { transform: translateX(-50%) translateX(5px) translateY(-8px) scale(var(--walk-to-scale)); }
+  78% { transform: translateX(-50%) translateX(-3px) scale(var(--walk-to-scale)); }
+  100% { bottom: var(--walk-to-y); transform: translateX(-50%) scale(var(--walk-to-scale)); }
+}
+@keyframes maneko-hop {
+  0%,100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-25px) rotate(3deg); }
+}
+.kids-bubble-v3 {
+  position: absolute;
+  left: 50%;
+  bottom: 390px;
+  z-index: 18;
+  max-width: 250px;
+  padding: 9px 13px;
+  border: 1px solid rgba(255,255,255,.9);
+  border-radius: 15px;
+  background: rgba(255,250,239,.92);
+  color: #4e3d2b;
+  box-shadow: 0 8px 22px rgba(39,25,12,.2);
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 1.45;
+  opacity: 0;
+  transform: translate(-50%,8px);
+  transition: .25s ease;
+  pointer-events: none;
+}
+.kids-bubble-v3.show { opacity: 1; transform: translate(-50%,0); }
+.kids-place-label {
+  position: absolute;
+  left: 15px;
+  bottom: 154px;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(34,22,10,.7);
+}
+.kids-place-label span { font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.kids-place-label strong { font-size: 18px; }
+.kids-record-fab {
+  position: absolute;
+  right: 14px;
+  bottom: 153px;
+  z-index: 18;
+  min-height: 43px;
+  padding: 0 15px;
+  border: 1px solid rgba(255,255,255,.9);
+  border-radius: 999px;
+  background: linear-gradient(180deg,#ffe58b,#f4bd3d);
+  box-shadow: 0 8px 22px rgba(102,63,9,.35);
+  color: #6b450b;
+  font: 800 12px "M PLUS Rounded 1c", sans-serif;
+}
+.kids-record-fab span { font-size: 18px; vertical-align: -1px; }
+.kids-toast-v3 {
+  position: absolute;
+  left: 50%;
+  bottom: 220px;
+  z-index: 30;
+  max-width: 82%;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(42,38,32,.87);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0;
+  transform: translate(-50%,8px);
+  transition: .25s ease;
+  pointer-events: none;
+}
+.kids-toast-v3.show { opacity: 1; transform: translate(-50%,0); }
+
+.kids-nav-v3 {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 1200;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  align-items: center;
+  padding: 6px 7px;
+  border: 1px solid rgba(255,255,255,.74);
+  border-radius: 25px;
+  background: rgba(255,250,239,.88);
+  box-shadow: 0 12px 32px rgba(45,30,15,.24);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+}
+.kids-nav-v3-item {
+  min-width: 0;
+  min-height: 62px;
+  border: 0;
+  border-radius: 19px;
+  background: transparent;
+  color: #796b58;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font: 800 10px "M PLUS Rounded 1c", sans-serif;
+}
+.kids-nav-v3-item.active {
+  background: rgba(244,190,55,.22);
+  color: #684817;
+}
+.kids-nav-v3-icon { font-size: 21px; line-height: 1.1; }
+
+/* Secondary tabs keep the town visible while the cream sheet protects legibility. */
+body.theme-kids .pc-scroll.kids-tab-shell {
+  padding-top: 184px;
+  padding-bottom: calc(132px + env(safe-area-inset-bottom) + var(--kb,0px));
+  background-position: center 50%;
+  background-size: cover;
+  background-repeat: no-repeat;
+  isolation: isolate;
+}
+body.theme-kids .pc-scroll.kids-tab-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg,transparent 0 125px,rgba(255,249,237,.72) 190px,#fff9ed 285px,#f8f0df 100%);
+  pointer-events: none;
+}
+body.theme-kids .kids-tab-add { background-image: linear-gradient(rgba(34,34,30,.05),rgba(34,34,30,.05)),url("/assets/kids/stage-1.webp"); }
+body.theme-kids .kids-tab-savings { background-image: linear-gradient(rgba(34,34,30,.04),rgba(34,34,30,.04)),url("/assets/kids/stage-2.webp"); }
+body.theme-kids .kids-tab-report { background-image: linear-gradient(rgba(34,34,30,.08),rgba(34,34,30,.08)),url("/assets/kids/stage-3.webp"); }
+body.theme-kids .kids-tab-family { background-image: linear-gradient(rgba(34,34,30,.08),rgba(34,34,30,.08)),url("/assets/kids/stage-1.webp"); }
+body.theme-kids .kids-tab-settings {
+  background-image: linear-gradient(rgba(19,29,53,.34),rgba(19,29,53,.2)),url("/assets/kids/stage-4.webp");
+  background-position: center 28%;
+}
+body.theme-kids .pc-scroll.kids-tab-shell .card {
+  position: relative;
+  background: rgba(255,252,244,.94);
+  border: 1px solid rgba(255,255,255,.92);
+  box-shadow: 0 10px 30px rgba(72,50,23,.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Full-screen 3D journey. */
+.jr-overlay.journey-v3-overlay {
+  overflow: hidden;
+  background: #203f69;
+}
+.journey-v3-canvas {
+  position: relative;
+  width: min(100%,460px);
+  height: 100dvh;
+  min-height: 720px;
+  margin: 0 auto;
+  overflow: hidden;
+  background: url("/assets/kids/journey-3d.webp") center / cover no-repeat;
+  color: #fff;
+}
+.journey-v3-canvas::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg,rgba(12,29,56,.3),transparent 23%,transparent 70%,rgba(18,28,30,.38));
+}
+.journey-v3-mist {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg,rgba(236,244,255,.6) 0%,rgba(236,244,255,.18) calc(100% - var(--reveal)),transparent calc(108% - var(--reveal)));
+  mix-blend-mode: screen;
+  transition: .5s ease;
+}
+.journey-v3-header {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(12px + env(safe-area-inset-top));
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.journey-v3-back,
+.journey-v3-goal,
+.journey-v3-footer {
+  border: 1px solid rgba(255,255,255,.58);
+  background: rgba(25,39,53,.58);
+  box-shadow: 0 10px 30px rgba(10,20,35,.24);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+}
+.journey-v3-back {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 20px;
+}
+.journey-v3-header > div {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  text-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.journey-v3-header span { font-size: 16px; font-weight: 900; }
+.journey-v3-header strong { font-size: 24px; }
+.journey-v3-goal {
+  position: absolute;
+  left: 50%;
+  top: calc(66px + env(safe-area-inset-top));
+  z-index: 12;
+  width: min(330px,calc(100% - 40px));
+  min-height: 46px;
+  border-radius: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.journey-v3-goal button {
+  width: 40px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 24px;
+}
+.journey-v3-goal > span {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.journey-v3-goal strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.journey-v3-goal small { font-size: 9.5px; color: rgba(255,255,255,.78); }
+.journey-v3-stage {
+  position: absolute;
+  z-index: 4;
+  max-width: 118px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255,255,255,.74);
+  text-shadow: 0 2px 7px rgba(0,0,0,.68);
+}
+.journey-v3-stage span {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(24,38,51,.62);
+  border: 1px solid rgba(255,255,255,.56);
+  font-size: 9px;
+  font-weight: 900;
+}
+.journey-v3-stage strong { font-size: 10px; line-height: 1.2; }
+.journey-v3-stage.current { color: #fff5b3; }
+.journey-v3-stage.current span { background: #e8a52c; color: #fff; }
+.journey-v3-stage.done span { background: #3a9e73; color: #fff; }
+.journey-v3-stage.future { opacity: .6; filter: saturate(.65); }
+.journey-v3-marker {
+  position: absolute;
+  z-index: 9;
+  width: 88px;
+  transform: translate(-50%,-50%);
+  transition: left .7s ease,top .7s ease;
+  filter: drop-shadow(0 8px 9px rgba(22,15,8,.42));
+}
+.journey-v3-marker span {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  transform: translate(-50%,-100%);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #d84a3a;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.journey-v3-marker img { display: block; width: 100%; height: 115px; object-fit: contain; object-position: bottom; }
+.journey-v3-footer {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 12;
+  padding: 10px 13px;
+  border-radius: 18px;
+}
+.journey-v3-footer div { display: flex; justify-content: space-between; align-items: center; }
+.journey-v3-footer strong { font-size: 13px; }
+.journey-v3-footer span { font-size: 12px; font-weight: 900; color: #ffe584; }
+.journey-v3-footer i {
+  display: block;
+  height: 7px;
+  margin: 6px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,.24);
+}
+.journey-v3-footer b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#f4bc42,#fff09a); }
+.journey-v3-footer p { margin: 0; font-size: 9.5px; font-weight: 700; color: rgba(255,255,255,.84); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kids-maneko-v3,
+  .kids-maneko-v3 img { animation: none !important; }
+}
+.quick-place {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.quick-place-status { margin: 0; font-size: 11px; }
+.quick-place-status.found {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 10px;
+  background: #e8f6ed;
+  color: #247353 !important;
+  font-weight: 800;
+}
+.family-tab-intro { overflow: hidden; }
+.family-tab-kicker {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .16em;
+  color: #a87b24;
+}
+.settings-drawer {
+  border-radius: 18px;
+  background: rgba(255,252,244,.9);
+  border: 1px solid rgba(255,255,255,.92);
+  box-shadow: 0 10px 30px rgba(72,50,23,.12);
+  overflow: hidden;
+}
+.settings-drawer > summary {
+  padding: 15px 16px;
+  list-style: none;
+  cursor: pointer;
+  color: #6c5124;
+  font-size: 13px;
+  font-weight: 900;
+}
+.settings-drawer > summary::-webkit-details-marker { display: none; }
+.settings-drawer > summary::after { content: "＋"; float: right; }
+.settings-drawer[open] > summary::after { content: "−"; }
+.settings-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 10px 12px;
+}
+.settings-drawer-body .card { box-shadow: none !important; }

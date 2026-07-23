@@ -6,7 +6,7 @@ import { openAlbum } from './album';
 import { reverseGeocode, searchPlaces, fmtDist } from './geo';
 import { ReactionKind } from './character';
 import { analyzeSpending, reactionFor } from './advice';
-import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids';
+import { kidsHome, kidsNavHtml, wireNav, KidsTab, stopKidsSpeech } from './kids-town';
 import { closeJourney, featuredGoal, currentStage, STAGES } from './journey';
 import { adultHome, adultNavHtml, stopChipRotation } from './adult';
 import { stageBackdrop } from './stage';
@@ -202,11 +202,15 @@ function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLE
   // こどもはキャンバスを透過にして body のステージ背景（renderHome が敷いた stageBackdrop）を
   // そのまま透かす（fill タブでも外側背景と完全連続に）。おとなは #F7F4EE で body と同色。
   const bg = mode === 'kids' ? 'transparent' : '#F7F4EE';
-  const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab) : adultNavHtml(active as KidsTab);
+  const family = overviewCache?.settings?.usage_type !== 'personal';
+  const navHtml = mode === 'kids' ? kidsNavHtml(active as KidsTab, family) : adultNavHtml(active as KidsTab);
   // .pc-scroll とナビは canvas(.pc-canvas) の直下に置く。以前は 840px 固定の内側 div を
   // 挟んでいたため、それが .pc-scroll の包含ブロックになって高さが 840 に固定され、
   // fillHeight でキャンバスを縮めても下端（記録ボタン等）がナビの裏に隠れていた。
-  const html = `<div class="pc-scroll"></div>${navHtml}`;
+  const kidsScene = mode === 'kids'
+    ? ` kids-tab-shell kids-tab-${active}${active === 'menu' ? (family ? ' kids-tab-family' : ' kids-tab-settings') : ''}`
+    : '';
+  const html = `<div class="pc-scroll${kidsScene}"></div>${navHtml}`;
   // fillHeight: キャンバスを画面高さに合わせ、内側 .pc-scroll だけでスクロール（二重スクロール防止）
   const { wrap, canvas, refit } = phoneCanvas(html, { bg, fillHeight: true });
   canvas.querySelector<HTMLElement>('.pc-scroll')!.append(...panels);
@@ -240,8 +244,8 @@ function renderModePicker(pendingUsageType?: UsageType) {
     el('h2', { textContent: '🐱 どっちのマネコにする?' }),
     el('p', { class: 'muted', textContent: 'あとで「せってい / メニュー」からいつでも切りかえられます。' }),
     el('div', { class: 'mode-grid' }, [
-      card('kids', '🏘️', 'こどもモード', 'マネコタウンでおこづかい・ちょきん・チャレンジ！ゲームみたいに楽しくきろく'),
-      card('adult', '💼', 'おとなモード', '予算・つかいみち・レポートが主役。マネコは小さな応援キャラに'),
+      card('kids', '🏘️', 'マネコタウン', '貯金するとマネコと街が育つ、楽しいお金管理モード'),
+      card('adult', '💼', '大人モード', '予算・支出・レポートをシンプルに管理'),
     ]),
   ]));
 }
@@ -283,8 +287,8 @@ function renderUsagePicker(existing: UserSettings | null) {
     el('h2', { textContent: '🐱 マネコをどう つかう?' }),
     el('p', { class: 'muted', textContent: 'あとで「せってい」からいつでも切りかえられます。' }),
     el('div', { class: 'mode-grid' }, [
-      card('family', '🏠', 'かぞくで つかう', '親子でつながって、おこづかい・お手伝い・見守りも'),
-      card('personal', '👤', 'じぶんで つかう', '自分の家計簿だけ。すぐおとなモードではじめられます'),
+      card('family', '🏠', '家族で使う', '家族とつながって、おこづかい・お手伝いも管理'),
+      card('personal', '👤', '個人で使う', '一人でシンプルにお金を管理'),
     ]),
   ]));
 }
@@ -292,15 +296,16 @@ function renderUsagePicker(existing: UserSettings | null) {
 // 初回チュートリアル（利用タイプ選択の直後・1回だけ）。前へ/次へ/スキップのコーチマークカード。
 const FAMILY_TUTORIAL: { emoji: string; title: string; text: string }[] = [
   { emoji: '🐱', title: 'ホーム', text: '買ったものにマネコが反応するよ。がんばりをそばで見てくれる相棒だよ。' },
-  { emoji: '✏️', title: 'きろく', text: '下のまん中の「きろく」ボタンから、買ったものをすぐ記録できるよ。' },
-  { emoji: '👨‍👩‍👧', title: 'かぞくとつながる', text: 'せってい→連携コードで、家族のアカウントとつながれるよ。' },
-  { emoji: '🧹', title: 'おこづかい・おてつだい', text: '親から子へおこづかいを送ったり、お手伝いポイントをやり取りできるよ。' },
+  { emoji: '🏘️', title: '街を育てる', text: '貯金するとマネコが道を進み、街と服装が変化します。' },
+  { emoji: '✏️', title: '支出を記録', text: '「記録」タブから、買ったものをすぐに記録できます。' },
+  { emoji: '👨‍👩‍👧', title: '家族とつながる', text: '「家族」タブの連携コードで、家族のアカウントとつながれます。' },
+  { emoji: '🧹', title: 'おこづかい・お手伝い', text: 'おこづかいや、お手伝いポイントを家族とやり取りできます。' },
 ];
 const PERSONAL_TUTORIAL: { emoji: string; title: string; text: string }[] = [
   { emoji: '🐱', title: 'ホーム', text: 'マネコが買い物に反応します。使いすぎに気づいたら、そっと教えてくれます。' },
-  { emoji: '🧾', title: 'きろく', text: 'レシートを読み取って自動入力できます（1日5回まで）。' },
+  { emoji: '🧾', title: '記録', text: 'レシートを読み取って自動入力できます（1日5回まで）。' },
   { emoji: '📊', title: 'レポート', text: 'カレンダーや地図で、いつ・どこで使ったか振り返れます。' },
-  { emoji: '🐷', title: 'ちょきん', text: '目標を作って、貯金の進み具合を見える化できます。' },
+  { emoji: '🌱', title: '貯金', text: '目標を作って、貯金の進み具合を見える化できます。' },
 ];
 function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement) {
   const canvas = anchorPanel.querySelector<HTMLElement>('.pc-canvas') ?? anchorPanel;
@@ -488,7 +493,7 @@ async function renderHome() {
             try {
               const r = await api.depositGoal(goalId, amount);
               overviewCache = null;
-              pendingCelebrate = { kind: 'generic', name: `¥${amount.toLocaleString('ja-JP')}ちょきん` };
+              pendingCelebrate = { kind: 'generic', name: `${amount.toLocaleString('ja-JP')}円を貯金` };
               if (r.reward.done) alert('🎉 もくひょう たっせい！ ボーナス +100XP');
               await renderHome();
             } catch (e) { alert((e as Error).message); }
@@ -574,17 +579,17 @@ function maybeShowMonthlySummary(o: Overview, recent: RecentReceipt[], anchor: H
   canvasModal(target, content, { title: `📖 ${s.label}のまとめ` });
 }
 
-// --- 🐷 ちょきん（目標・おこづかい/収入） --------------------------------
+// --- 🌱 貯金（目標・おこづかい/収入） --------------------------------
 function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   const kids = mode === 'kids';
   const out: HTMLElement[] = [];
 
   const savedAll = o.goals.reduce((a, g) => a + g.saved, 0);
   out.push(el('section', { class: 'card sv-head' }, [
-    el('h2', { textContent: '🐷 ちょきん箱' }),
+    el('h2', { textContent: '🌱 貯金' }),
     el('div', { class: 'sv-stats' }, [
-      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? 'おさいふ' : '使えるお金（記録上）' }), el('strong', { textContent: yen(o.wallet) })]),
-      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? 'ちょきんできた' : '貯金合計' }), el('strong', { textContent: yen(savedAll) })]),
+      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? 'お財布' : '使えるお金（記録上）' }), el('strong', { textContent: yen(o.wallet) })]),
+      el('div', { class: 'sv-stat' }, [el('span', { class: 'k', textContent: kids ? '貯金できた金額' : '貯金合計' }), el('strong', { textContent: yen(savedAll) })]),
     ]),
   ]));
 
@@ -593,11 +598,11 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
 
   // 収入（おこづかい / 給料）
   const amount = el('input', { type: 'number', class: 'price', placeholder: '金額', min: '1', value: kids && o.settings?.allowance ? String(o.settings.allowance) : '' });
-  const nameIn = el('input', { class: 'grow', placeholder: kids ? 'おこづかい / おとしだま など' : '給料 / ボーナス など', value: kids ? 'おこづかい' : '給料' });
-  const incomeBtn = el('button', { class: 'primary', textContent: kids ? '＋ もらった！' : '＋ 収入を記録' });
+  const nameIn = el('input', { class: 'grow', placeholder: kids ? 'おこづかい / お年玉 など' : '給料 / ボーナス など', value: kids ? 'おこづかい' : '給料' });
+  const incomeBtn = el('button', { class: 'primary', textContent: kids ? '＋ もらったお金を追加' : '＋ 収入を記録' });
   incomeBtn.addEventListener('click', async () => {
     const a = Math.round(Number(amount.value));
-    if (!Number.isFinite(a) || a <= 0) return alert('金額を入れてね');
+    if (!Number.isFinite(a) || a <= 0) return alert('金額を入力してください');
     try {
       await api.addIncome({ name: nameIn.value.trim() || undefined, amount: a });
       overviewCache = null;
@@ -610,7 +615,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   });
   out.push(el('section', { class: 'card' }, [
     el('h2', { textContent: kids ? '💰 おこづかい・もらったお金' : '💰 収入' }),
-    el('div', { class: 'row' }, [labeled('なまえ', nameIn), labeled('金額', amount), incomeBtn]),
+    el('div', { class: 'row' }, [labeled('名前', nameIn), labeled('金額', amount), incomeBtn]),
   ]));
 
   // 目標一覧
@@ -622,27 +627,31 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     const pace = monthlyNeeded(g);
     const paceLine = pace
       ? el('p', { class: 'sv-pace', textContent: pace.overdue
-          ? (kids ? `きげんが すぎてるよ！あと ${yen(g.target - g.saved)}` : `期限を過ぎています（あと ${yen(g.target - g.saved)}）`)
+          ? (kids ? `期限を過ぎています。あと ${yen(g.target - g.saved)}` : `期限を過ぎています（あと ${yen(g.target - g.saved)}）`)
           : (kids
-              ? `${fmtDate(g.deadline!)} までに たっせいするには、まいつき ${yen(pace.perMonth)} ずつ！`
+              ? `${fmtDate(g.deadline!)}までに達成するには、毎月 ${yen(pace.perMonth)}ずつ`
               : `期限 ${fmtDate(g.deadline!)} ・ 今のペースなら毎月あと ${yen(pace.perMonth)} でOK（残り${pace.months}ヶ月）`) })
       : null;
-    const dep = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくら入れる?' : '入金額', min: '1' });
-    const depBtn = el('button', { class: 'primary', textContent: kids ? 'ちょきんする' : '入金' });
+    const dep = el('input', { type: 'number', class: 'price', placeholder: kids ? '貯金する金額' : '入金額', min: '1' });
+    const depBtn = el('button', { class: 'primary', textContent: kids ? '貯金する' : '入金' });
     depBtn.addEventListener('click', async () => {
       const a = Math.round(Number(dep.value));
-      if (!Number.isFinite(a) || a <= 0) return alert('金額を入れてね');
-      if (kids && a > o.wallet && !confirm('おさいふに入っている金額より多いけど、だいじょうぶ?')) return;
+      if (!Number.isFinite(a) || a <= 0) return alert('金額を入力してください');
+      if (kids && a > o.wallet && !confirm('お財布の残高より多い金額です。このまま貯金しますか？')) return;
       try {
         const r = await api.depositGoal(g.id, a);
         overviewCache = null;
-        if (r.reward.done) alert(`🎉 もくひょう「${g.name}」たっせい！ ボーナス +100XP`);
+        if (r.reward.done) alert(`🎉 目標「${g.name}」達成！ ボーナス +100XP`);
+        if (kids) {
+          pendingCelebrate = { kind: 'generic', name: `${a.toLocaleString('ja-JP')}円を貯金` };
+          homeTab = 'home';
+        }
         await renderHome();
       } catch (e) { alert((e as Error).message); }
     });
     const del = el('button', { class: 'link-btn danger', textContent: '削除' });
     del.addEventListener('click', async () => {
-      if (!confirm(`「${g.name}」を削除する?（ちょきんした分はおさいふに戻ります。ぼうけんマップの すすみも そのぶん もどります）`)) return;
+      if (!confirm(`「${g.name}」を削除しますか？（貯金した分はお財布に戻り、旅の進み具合も戻ります）`)) return;
       await api.deleteGoal(g.id);
       overviewCache = null;
       await renderHome();
@@ -651,7 +660,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
       el('div', { class: 'sv-goal-head' }, [
         el('strong', { textContent: `${g.emoji ?? '⭐'} ${g.name}` }),
         el('span', { class: 'sv-goal-nums', textContent: `${yen(g.saved)} / ${yen(g.target)}（${p}%）` }),
-        g.done ? el('span', { class: 'sv-done-badge', textContent: 'たっせい！🎉' }) : del,
+        g.done ? el('span', { class: 'sv-done-badge', textContent: '達成！🎉' }) : del,
       ]),
       el('div', { class: 'sv-bar' }, [fill]),
       ...(paceLine ? [paceLine] : []),
@@ -660,14 +669,14 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
   });
 
   // 新しい目標（期限は任意。設定すると「毎月あと¥X」を出す）
-  const gName = el('input', { class: 'grow', placeholder: kids ? 'ほしいもの（れい: ゲームき）' : '目標（例: 旅行資金）' });
+  const gName = el('input', { class: 'grow', placeholder: kids ? '欲しいもの（例: ゲーム機）' : '目標（例: 旅行資金）' });
   const gEmoji = el('select', {}, ['🎮', '⭐', '🚲', '✈️', '💻', '🎁', '📱', '👟'].map((e2) => el('option', { value: e2, textContent: e2 })));
-  const gTarget = el('input', { type: 'number', class: 'price', placeholder: kids ? 'いくらためる?' : '目標額', min: '1' });
+  const gTarget = el('input', { type: 'number', class: 'price', placeholder: kids ? '目標金額' : '目標額', min: '1' });
   const gDeadline = el('input', { type: 'date' });
-  const gBtn = el('button', { class: 'primary', textContent: kids ? '＋ もくひょうをつくる' : '＋ 目標をつくる' });
+  const gBtn = el('button', { class: 'primary', textContent: '＋ 目標を作る' });
   gBtn.addEventListener('click', async () => {
     const t = Math.round(Number(gTarget.value));
-    if (!gName.value.trim() || !Number.isFinite(t) || t <= 0) return alert('なまえと金額を入れてね');
+    if (!gName.value.trim() || !Number.isFinite(t) || t <= 0) return alert('名前と金額を入力してください');
     try {
       await api.addGoal({ name: gName.value.trim(), emoji: gEmoji.value, target: t, deadline: gDeadline.value || undefined });
       overviewCache = null;
@@ -675,9 +684,9 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
     } catch (e) { alert((e as Error).message); }
   });
   out.push(el('section', { class: 'card' }, [
-    el('h2', { textContent: kids ? '⭐ もくひょう' : '⭐ 貯金目標' }),
-    ...(goalRows.length ? goalRows : [el('p', { class: 'muted', textContent: kids ? 'ほしいものを「もくひょう」にして、ちょきんをはじめよう！' : '目標を作って貯金を見える化しましょう。' })]),
-    el('div', { class: 'row' }, [labeled('なまえ', gName), labeled('マーク', gEmoji), labeled('金額', gTarget), labeled(kids ? 'いつまで？（なくてもOK）' : '期限（任意）', gDeadline), gBtn]),
+    el('h2', { textContent: '⭐ 貯金目標' }),
+    ...(goalRows.length ? goalRows : [el('p', { class: 'muted', textContent: kids ? '欲しいものを目標にして、貯金を始めよう。' : '目標を作って貯金を見える化しましょう。' })]),
+    el('div', { class: 'row' }, [labeled('名前', gName), labeled('マーク', gEmoji), labeled('金額', gTarget), labeled('期限（任意）', gDeadline), gBtn]),
   ]));
   return out;
 }
@@ -685,7 +694,7 @@ function savingsPanel(o: Overview, mode: AppMode): HTMLElement[] {
 // 🧹 子のおてつだいカード（残高・お手伝いリスト・ポイント交換・履歴）
 // savingsPanel は同期なので、カードは即返し・中身は myChores() で後埋めする。
 function choreKidsCard(o: Overview): HTMLElement {
-  const card = el('section', { class: 'card chore-card' }, [el('h2', { textContent: '🧹 おてつだい' })]);
+  const card = el('section', { class: 'card chore-card' }, [el('h2', { textContent: '🧹 お手伝い' })]);
   const ptsV = el('strong', { class: 'chore-pts-v', textContent: `⭐ ${o.chorePoints} pt` });
   card.append(el('div', { class: 'chore-pts' }, [
     el('span', { class: 'chore-pts-k', textContent: 'たまったポイント' }), ptsV,
@@ -697,7 +706,7 @@ function choreKidsCard(o: Overview): HTMLElement {
 
   // 交換ボタン（¥のみ。コインにかえるボタンはガチャ撤去とあわせて削除・サーバーAPIは残置）
   const drawExchange = (points: number) => {
-    const yenBtn = el('button', { class: 'primary chore-ex-btn', textContent: `¥に かえる（${points}pt → ¥${points}）` });
+    const yenBtn = el('button', { class: 'primary chore-ex-btn', textContent: `お金に交換（${points}pt → ¥${points}）` });
     yenBtn.disabled = points <= 0;
     yenBtn.addEventListener('click', async () => {
       yenBtn.disabled = true;
@@ -706,7 +715,7 @@ function choreKidsCard(o: Overview): HTMLElement {
         overviewCache = null;
         incomesCache = null; // ¥交換は incomes に1件できる
         await markEventsSeen(); // 自分の交換にトーストを鳴らさない
-        alert(`¥${r.yen} が おさいふに はいったよ！`);
+        alert(`¥${r.yen}をお財布に追加しました`);
         await renderHome();
       } catch (e) { alert((e as Error).message); yenBtn.disabled = false; }
     });
@@ -718,20 +727,20 @@ function choreKidsCard(o: Overview): HTMLElement {
 
   // 連携中: リスト・履歴を後から埋める
   drawExchange(o.chorePoints);
-  listWrap.append(el('p', { class: 'muted', textContent: 'よみこみちゅう…' }));
+  listWrap.append(el('p', { class: 'muted', textContent: '読み込み中…' }));
   void (async () => {
     let d: Awaited<ReturnType<typeof api.myChores>>;
     try { d = await api.myChores(); }
-    catch { listWrap.replaceChildren(el('p', { class: 'muted', textContent: 'おてつだいを よみこめませんでした。' })); return; }
+    catch { listWrap.replaceChildren(el('p', { class: 'muted', textContent: 'お手伝いを読み込めませんでした。' })); return; }
     ptsV.textContent = `⭐ ${d.points} pt`;
     drawExchange(d.points);
     listWrap.replaceChildren(...(d.chores.length
       ? d.chores.map(choreRow)
-      : [el('p', { class: 'muted', textContent: 'おてつだいが まだ ないよ。おうちの人に つくってもらおう！' })]));
+      : [el('p', { class: 'muted', textContent: 'お手伝いはまだありません。家族に作ってもらいましょう。' })]));
     const hist = d.history.slice(0, 3);
     if (hist.length) {
       histWrap.replaceChildren(
-        el('div', { class: 'chore-hist-h', textContent: 'さいきんの できごと' }),
+        el('div', { class: 'chore-hist-h', textContent: '最近の履歴' }),
         ...hist.map((h) => el('div', { class: 'chore-hist-row' }, [
           el('span', { class: 'chore-hist-name', textContent: `${h.name} +${h.points}pt` }),
           el('span', { class: 'chore-hist-mark ' + h.status,
@@ -746,7 +755,7 @@ function choreKidsCard(o: Overview): HTMLElement {
 // お手伝い1行（「やった！」→ claim → 「かくにん まちだよ ⏳」に切替）
 function choreRow(c: { id: number; name: string; points: number; pending: boolean }): HTMLElement {
   const btn = el('button', { class: 'primary chore-do' });
-  const setPending = () => { btn.textContent = 'かくにん まちだよ ⏳'; btn.disabled = true; btn.classList.add('waiting'); };
+  const setPending = () => { btn.textContent = '確認待ち ⏳'; btn.disabled = true; btn.classList.add('waiting'); };
   if (c.pending) setPending();
   else {
     btn.textContent = 'やった！';
@@ -769,7 +778,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const kids = mode === 'kids';
 
   // モード切替
-  const modeBtn = el('button', { class: 'primary', textContent: kids ? '💼 おとなモードにきりかえ' : '🏘️ こどもモードにきりかえ' });
+  const modeBtn = el('button', { class: 'primary', textContent: kids ? '💼 大人モードに切り替え' : '🏘️ マネコタウンに切り替え' });
   modeBtn.addEventListener('click', async () => {
     await api.saveSettings({ mode: kids ? 'adult' : 'kids' });
     overviewCache = null;
@@ -778,17 +787,22 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   });
   // 連携中の子は おとなモードに切り替えできない（サーバーも 403）。ボタンを出さず案内だけ。
   const modeSwitch: HTMLElement = kids && o.linkedAsChild
-    ? el('p', { class: 'muted', textContent: 'おうちと つながってるあいだは きりかえできないよ' })
+    ? el('p', { class: 'muted', textContent: '家族と連携している間は、大人モードへ切り替えられません。' })
     : modeBtn;
   const modeSec = el('section', { class: 'card' }, [
-    el('h2', { textContent: kids ? '⚙️ メニュー' : '⚙️ せってい' }),
-    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ Lv.${s.level} ・ いまは${kids ? 'こども' : 'おとな'}モード` }),
+    el('h2', { textContent: kids ? '⚙️ 設定' : '⚙️ 設定' }),
+    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ ${kids ? 'マネコタウン' : '大人'}モード` }),
     modeSwitch,
   ]);
+  if (kids) {
+    const reportBtn = el('button', { class: 'link-btn', textContent: '📊 支出レポートを見る' });
+    reportBtn.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
+    modeSec.append(reportBtn);
+  }
 
   // 利用タイプ（家族⇔個人）切替。personal→family に切り替えても連携等のデータは消さない（非表示になるだけ）。
   const isPersonal = s.usage_type === 'personal';
-  const usageBtn = el('button', { class: 'primary', textContent: isPersonal ? '🏠 かぞく利用にきりかえ' : '👤 個人利用にきりかえ' });
+  const usageBtn = el('button', { class: 'primary', textContent: isPersonal ? '🏠 家族利用に切り替え' : '👤 個人利用に切り替え' });
   usageBtn.addEventListener('click', async () => {
     try {
       await api.saveSettings({ usage_type: isPersonal ? 'family' : 'personal' });
@@ -799,7 +813,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const usageSec = el('section', { class: 'card' }, [
     el('h2', { textContent: '👤 利用タイプ' }),
     el('p', { class: 'muted', textContent: isPersonal
-      ? '今は「じぶんで つかう」設定です。' : '今は「かぞくで つかう」設定です。' }),
+      ? '現在は個人利用です。' : '現在は家族利用です。' }),
     usageBtn,
   ]);
 
@@ -820,12 +834,12 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     } catch (e) { alert((e as Error).message); }
   });
   const moneySec = el('section', { class: 'card' }, [
-    el('h2', { textContent: kids ? '💰 おこづかいのせってい' : '💰 予算と収入' }),
+    el('h2', { textContent: kids ? '💰 おこづかいの設定' : '💰 予算と収入' }),
     el('div', { class: 'row' }, kids
       ? [labeled('月のおこづかい', allowance), labeled('おさいふのスタート額', startBal), saveBtn]
       : [labeled('月の予算', budget), labeled('月の収入（手取り）', income), saveBtn]),
     el('p', { class: 'muted', textContent: kids
-      ? 'おこづかいをもらったら「ちょきん」タブの「＋もらった！」でおさいふに入るよ。'
+      ? 'おこづかいをもらったら「貯金」タブからお財布に追加できます。'
       : '予算を設定するとホームに「今月あと使える」が表示されます。' }),
   ]);
 
@@ -888,7 +902,19 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const familySec = isPersonal ? null : await familyLinkCard(mode, o);
 
   const spacesSec = groupsCard(myGroups);
-  return [modeSec, spacesSec, usageSec, ...(familySec ? [familySec] : []), moneySec, logoutSec];
+  if (kids && familySec) {
+    const intro = el('section', { class: 'card family-tab-intro' }, [
+      el('span', { class: 'family-tab-kicker', textContent: 'FAMILY' }),
+      el('h2', { textContent: '家族' }),
+      el('p', { class: 'muted', textContent: 'おこづかいやお手伝いを、家族と一緒に管理できます。' }),
+    ]);
+    const settingsDrawer = el('details', { class: 'settings-drawer' }, [
+      el('summary', { textContent: '⚙️ 設定とアカウント' }),
+      el('div', { class: 'settings-drawer-body' }, [modeSec, spacesSec, usageSec, moneySec, logoutSec]),
+    ]);
+    return [intro, familySec, settingsDrawer];
+  }
+  return [modeSec, spacesSec, usageSec, moneySec, logoutSec];
 }
 
 // --- 👨‍👩‍👧 親子アカウント連携 --------------------------------------------
@@ -897,7 +923,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
 // 自分が子として連携中なら、親機能は出さず案内だけ。
 async function familyLinkCard(mode: AppMode, o: Overview): Promise<HTMLElement> {
   const kids = mode === 'kids';
-  const h2 = el('h2', { textContent: kids ? '👨‍👩‍👧 おうちと つながる' : '👨‍👩‍👧 かぞくと つながる' });
+  const h2 = el('h2', { textContent: kids ? '👨‍👩‍👧 家族とつながる' : '👨‍👩‍👧 家族とつながる' });
   // 承認待ちがあれば見出しに🔔バッジ（親のみ）
   if (!kids && o.pendingChoreCount > 0) h2.append(el('span', { class: 'chore-badge', textContent: `🔔${o.pendingChoreCount}` }));
   const sec = el('section', { class: 'card' }, [h2]);
@@ -906,7 +932,7 @@ async function familyLinkCard(mode: AppMode, o: Overview): Promise<HTMLElement> 
   try {
     links = await api.getLinks();
   } catch {
-    sec.append(el('p', { class: 'muted', textContent: kids ? 'つながり情報を よみこめませんでした。' : '連携情報を読み込めませんでした。' }));
+    sec.append(el('p', { class: 'muted', textContent: '連携情報を読み込めませんでした。' }));
     return sec;
   }
 
@@ -915,10 +941,10 @@ async function familyLinkCard(mode: AppMode, o: Overview): Promise<HTMLElement> 
     const parent = links.asChild.username;
     const linkId = links.asChild.id;
     if (kids) {
-      sec.append(el('p', { class: 'link-connected', textContent: `✓ ${parent} と つながってるよ` }));
-      const stop = el('button', { class: 'link-btn', textContent: 'つながりを やめる' });
+      sec.append(el('p', { class: 'link-connected', textContent: `✓ ${parent}さんと連携中` }));
+      const stop = el('button', { class: 'link-btn', textContent: '連携を解除' });
       stop.addEventListener('click', async () => {
-        if (!confirm(`${parent} との つながりを やめる?（きろくは のこるよ）`)) return;
+        if (!confirm(`${parent}さんとの連携を解除しますか？（記録は残ります）`)) return;
         try { await api.deleteLink(linkId); overviewCache = null; await renderHome(); }
         catch (e) { alert((e as Error).message); }
       });
@@ -931,24 +957,24 @@ async function familyLinkCard(mode: AppMode, o: Overview): Promise<HTMLElement> 
 
   // こども・未連携: コード入力でつながる
   if (kids) {
-    const code = el('input', { class: 'grow link-code-input', type: 'text', placeholder: '8けたの コード', maxLength: 8 });
+    const code = el('input', { class: 'grow link-code-input', type: 'text', placeholder: '8桁の連携コード', maxLength: 8 });
     code.setAttribute('autocapitalize', 'characters');
     code.setAttribute('autocomplete', 'off');
-    const btn = el('button', { class: 'primary', textContent: 'つながる' });
+    const btn = el('button', { class: 'primary', textContent: '連携する' });
     btn.addEventListener('click', async () => {
       const v = code.value.trim();
-      if (!v) { alert('コードを いれてね'); return; }
+      if (!v) { alert('連携コードを入力してください'); return; }
       btn.disabled = true;
       try {
         const r = await api.joinLink(v);
         overviewCache = null;
-        alert(`${r.parent.username} と つながったよ！🎉`);
+        alert(`${r.parent.username}さんと連携しました！🎉`);
         await renderHome();
       } catch (e) { alert((e as Error).message); btn.disabled = false; }
     });
     sec.append(
-      el('p', { class: 'muted', textContent: 'おうちの人の コードを いれてね' }),
-      el('div', { class: 'row' }, [labeled('コード', code), btn]),
+      el('p', { class: 'muted', textContent: '家族のアプリに表示されたコードを入力してください。' }),
+      el('div', { class: 'row' }, [labeled('連携コード', code), btn]),
     );
     return sec;
   }
@@ -1160,7 +1186,7 @@ function openChoreParent(anchor: HTMLElement, childId: number, username: string)
 
 // --- ✏️ きろく（ワンタップ記録） ------------------------------------------
 const QUICK_CATEGORIES = ['食費', '日用品', '交通', '買い物', '観光', 'その他'];
-const KIDS_CATEGORIES = ['おかし', 'ごはん', 'おもちゃ・ゲーム', 'ほん・ぶんぼうぐ', 'そのほか'];
+const KIDS_CATEGORIES = ['お菓子', '食事', 'ゲーム・趣味', '本・文房具', 'その他'];
 
 function quickAddPanel(mode: AppMode): HTMLElement[] {
   const kids = mode === 'kids';
@@ -1186,9 +1212,21 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
   let category = cats[0];
 
   const priceInput = el('input', { class: 'quick-price', type: 'number', inputMode: 'numeric', placeholder: '0', min: '1' });
-  const nameInput = el('input', { class: 'grow', placeholder: kids ? 'なにをかった?（れい: おかし）' : 'なにを買った?（例: ラーメン、シャンプー）' });
-  const storeInput = el('input', { class: 'grow', placeholder: kids ? 'おみせ（なくてもOK）' : 'お店（なくてもOK）' });
+  const nameInput = el('input', { class: 'grow', placeholder: kids ? '何を買った？（例: お菓子）' : 'なにを買った?（例: ラーメン、シャンプー）' });
+  const storeInput = el('input', { class: 'grow', placeholder: 'お店（任意）' });
   const dateInput = el('input', { type: 'date', value: todayIso() });
+  let pickedLocation: { lat: number | null; lng: number | null; name: string | null } = { lat: null, lng: null, name: null };
+  const locationStatus = el('p', { class: 'quick-place-status muted', textContent: '場所は未設定です' });
+  const mapButton = el('button', { type: 'button', class: 'link-btn', textContent: '🗺️ 地図から場所を選ぶ' });
+  mapButton.addEventListener('click', async () => {
+    const result = await openMapPicker(pickedLocation.lat != null && pickedLocation.lng != null
+      ? { lat: pickedLocation.lat, lng: pickedLocation.lng }
+      : null);
+    if (!result) return;
+    pickedLocation = { lat: result.lat, lng: result.lng, name: result.name };
+    locationStatus.textContent = `📍 場所を設定しました: ${result.name || `${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`}`;
+    locationStatus.classList.add('found');
+  });
 
   // カテゴリはチップで1タップ選択
   const chipRow = el('div', { class: 'chip-row' });
@@ -1212,14 +1250,14 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
     extraWrap.append(el('div', { class: 'row' }, [n, p]));
     return row;
   };
-  const addRowBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 品をふやす' });
+  const addRowBtn = el('button', { type: 'button', class: 'link-btn', textContent: '＋ 品目を増やす' });
   addRowBtn.addEventListener('click', () => { addExtraRow(); });
 
   // 🧾 レシート読み取り（Gemini/Claude vision OCR）→ 品名・金額・お店・日付を自動入力
   // capture は付けない（iOSでカメラ直起動になりアルバム選択を塞ぐ。おとな詳細フォームと同挙動）
   const ocrInput = el('input', { type: 'file', accept: 'image/*' });
   ocrInput.style.display = 'none';
-  const ocrBtn = el('button', { type: 'button', class: 'af-ocr', textContent: kids ? '🧾 レシートを よみとって じどうにゅうりょく' : '🧾 レシートを読み取って自動入力' });
+  const ocrBtn = el('button', { type: 'button', class: 'af-ocr', textContent: '🧾 レシートを読み取って自動入力' });
   ocrBtn.addEventListener('click', () => ocrInput.click());
   ocrInput.addEventListener('change', async () => {
     const f = ocrInput.files?.[0];
@@ -1227,16 +1265,25 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
     if (!f) return;
     ocrBtn.disabled = true;
     const orig = ocrBtn.textContent;
-    ocrBtn.textContent = 'よみとりちゅう…';
+    ocrBtn.textContent = '読み取り中…';
     try {
       const dataUrl = await resizeImage(f, 1280, 0.8);
       const r = await runOcr(dataUrl);
       if (!r.items.length) {
-        alert(kids ? 'うまく よみとれなかったよ。あかるいところで まっすぐ とってみてね' : 'レシートを読み取れませんでした。明るい場所でまっすぐ撮ってみてください。');
+        alert('レシートを読み取れませんでした。明るい場所でまっすぐ撮ってみてください。');
         return;
       }
       if (r.store_name) storeInput.value = r.store_name;
       if (r.purchased_on) dateInput.value = r.purchased_on;
+      if (r.address) {
+        pickedLocation = { lat: null, lng: null, name: r.address };
+        locationStatus.textContent = `📍 レシートから場所を読み取りました: ${r.address}`;
+        locationStatus.classList.add('found');
+      } else if (r.store_name) {
+        pickedLocation = { lat: null, lng: null, name: r.store_name };
+        locationStatus.textContent = `📍 レシートからお店を読み取りました: ${r.store_name}`;
+        locationStatus.classList.add('found');
+      }
       // items[0] をメイン欄へ、items[1..] を追加行へ流し込む（既存の追加行は置き換え）
       nameInput.value = r.items[0].name;
       priceInput.value = String(r.items[0].price);
@@ -1255,20 +1302,21 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
     }
   });
 
-  const saveBtn = el('button', { type: 'submit', class: 'primary big-add', textContent: kids ? '🐱 きろくする！' : '🐱 記録する' });
+  const saveBtn = el('button', { type: 'submit', class: 'primary big-add', textContent: '🐱 記録する' });
   const form = el('form', { class: 'card quick-card' }, [
-    el('h2', { textContent: kids ? '✏️ おかいものメモ' : '✏️ きろく（かんたん記録）' }),
-    el('p', { class: 'muted', textContent: kids ? 'なまえと金額だけでOK。きろくするとマネコがよろこぶよ！' : '品名と金額だけでOK。マネコがホームで反応するよ。' }),
-    labeled(kids ? 'どのおさいふに入れる?' : '保存先の家計簿', groupSelect),
+    el('h2', { textContent: kids ? '✏️ 支出を記録' : '✏️ きろく（かんたん記録）' }),
+    el('p', { class: 'muted', textContent: kids ? '品名と金額だけでも記録できます。' : '品名と金額だけでOK。マネコがホームで反応するよ。' }),
+    labeled(kids ? '記録するスペース' : '保存先の家計簿', groupSelect),
     ocrBtn,
     ocrInput,
-    el('p', { class: 'muted af-ocr-note', textContent: kids ? 'レシートは よみとりに つかうだけ。しゃしんは ほぞんしないよ。' : 'レシートは読み取りに使うだけで、画像は保存しません。' }),
+    el('p', { class: 'muted af-ocr-note', textContent: 'レシート画像は読み取りだけに使い、保存しません。' }),
     el('div', { class: 'quick-amount-row' }, [el('span', { class: 'quick-yen', textContent: '¥' }), priceInput]),
     labeled('なにを買った?', nameInput),
     chipRow,
     extraWrap,
     addRowBtn,
     el('div', { class: 'row' }, [labeled('日付', dateInput), labeled('お店（任意）', storeInput)]),
+    el('div', { class: 'quick-place' }, [mapButton, locationStatus]),
     el('div', { class: 'center' }, [saveBtn]),
   ]);
   form.addEventListener('submit', async (e) => {
@@ -1287,6 +1335,9 @@ function quickAddPanel(mode: AppMode): HTMLElement[] {
         category,
         purchased_on: dateInput.value || todayIso(),
         items,
+        lat: pickedLocation.lat,
+        lng: pickedLocation.lng,
+        place_name: pickedLocation.name,
       });
       // ホームに戻ってマネコがお祝い（ごほうびも一緒に表示）
       const pseudo = { store_name: storeInput.value, category, items, trip_title: '', purchased_on: dateInput.value } as unknown as RecentReceipt;

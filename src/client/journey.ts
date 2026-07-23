@@ -15,11 +15,11 @@ const GOAL_FALLBACK = 10000;
 // 各ステージは「ゴールに対する割合」で置く（ゴール金額が変わっても比率で自動配置）。
 export type Stage = { ratio: number; key: string; name: string; sub: string };
 export const STAGES: Stage[] = [
-  { ratio: 0,    key: 'start', name: 'びんぼう長屋',   sub: '10円玉から スタート' },
-  { ratio: 0.25, key: 'town',  name: 'かけだしの町',   sub: 'はたけと パンや' },
-  { ratio: 0.50, key: 'shop',  name: 'にぎわい商店街', sub: 'おみせが いっぱい！' },
-  { ratio: 0.75, key: 'tower', name: '大都会タワマン', sub: 'たかい たかい ビル！' },
-  { ratio: 1,    key: 'gold',  name: '黄金の都',       sub: 'だいふごうネコ！' },
+  { ratio: 0,    key: 'start', name: 'はじまりの街',   sub: '小さな一歩からスタート' },
+  { ratio: 0.25, key: 'town',  name: '小さな商店街',   sub: 'お店が少しずつ増えていく' },
+  { ratio: 0.50, key: 'shop',  name: 'にぎわいの街',   sub: '広場に活気が生まれる' },
+  { ratio: 0.75, key: 'tower', name: '光の王都',       sub: '目標まであと少し' },
+  { ratio: 1,    key: 'gold',  name: '夢の街',         sub: '目標達成の景色' },
 ];
 
 // 切替の並び順: 未達成（作成順）→ 達成済み（作成順）。
