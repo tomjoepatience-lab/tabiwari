@@ -1200,6 +1200,7 @@ let renderEpoch = 0;
 
 async function renderHome() {
   const epoch = ++renderEpoch;
+  document.body.classList.remove('theme-auth');
   charts.forEach((c) => c.destroy());
   charts = [];
   stopChipRotation();
@@ -3347,27 +3348,175 @@ function inviteTokenFromLocation(): string | null {
 }
 
 function renderAuth() {
-  // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
-  document.documentElement.style.background = document.body.style.background = '';
+  document.body.classList.remove('theme-kids', 'theme-adult');
+  document.body.classList.add('theme-auth');
+  document.documentElement.style.background = document.body.style.background = '#d8ebf1';
   let mode: 'login' | 'register' = 'login';
-  const email = el('input', { name: 'email', type: 'text', placeholder: 'name@example.com', autocomplete: 'username' });
-  const displayName = el('input', { name: 'display_name', placeholder: 'マネコに表示する名前', autocomplete: 'name' });
-  const displayNameField = labeled('表示名', displayName);
-  const password = el('input', { name: 'password', type: 'password', placeholder: 'パスワード', autocomplete: 'current-password' });
-  const errBox = el('p', { class: 'status err', style: 'display:none' as any });
-  const submit = el('button', { type: 'submit', class: 'primary', textContent: 'ログイン' });
-  const toggle = el('button', { type: 'button', class: 'link-btn', textContent: 'アカウントを作る' });
-  const forgot = el('button', { type: 'button', class: 'link-btn', textContent: 'パスワードを忘れた' });
+  const email = el('input', {
+    name: 'email',
+    type: 'text',
+    placeholder: 'メールアドレス（旧ユーザーはユーザー名）',
+    autocomplete: 'username',
+    inputmode: 'email',
+  } as any);
+  const displayName = el('input', {
+    name: 'display_name',
+    placeholder: '例：ともき',
+    autocomplete: 'name',
+  });
+  const password = el('input', {
+    name: 'password',
+    type: 'password',
+    placeholder: 'パスワード',
+    autocomplete: 'current-password',
+  });
+  const errBox = el('p', {
+    class: 'auth-v2-error',
+    role: 'alert',
+    style: 'display:none' as any,
+  });
+  const submit = el('button', {
+    type: 'submit',
+    class: 'auth-v2-primary',
+    textContent: 'マネコタウンへ',
+  });
+  const toggle = el('button', {
+    type: 'button',
+    class: 'auth-v2-switch-button',
+    textContent: 'アカウントを作る',
+  });
+  const forgot = el('button', {
+    type: 'button',
+    class: 'auth-v2-forgot',
+    textContent: '忘れた場合',
+  });
+  const eye = el('button', {
+    type: 'button',
+    class: 'auth-v2-eye',
+    textContent: '👁',
+    'aria-label': 'パスワードを表示',
+  } as any);
+  eye.addEventListener('click', () => {
+    const reveal = password.type === 'password';
+    password.type = reveal ? 'text' : 'password';
+    eye.textContent = reveal ? '◉' : '👁';
+    eye.setAttribute('aria-label', reveal ? 'パスワードを隠す' : 'パスワードを表示');
+  });
+
+  const authField = (
+    labelText: string,
+    input: HTMLInputElement,
+    icon: string,
+    trailing?: HTMLElement,
+  ) => {
+    const labelRow = el('span', { class: 'auth-v2-field-top' }, [
+      el('span', { textContent: labelText }),
+      ...(trailing ? [trailing] : []),
+    ]);
+    return el('label', { class: 'auth-v2-field' }, [
+      labelRow,
+      el('span', { class: 'auth-v2-input' }, [
+        el('span', { class: 'auth-v2-input-icon', textContent: icon, 'aria-hidden': 'true' } as any),
+        input,
+        ...(input === password ? [eye] : []),
+      ]),
+    ]);
+  };
+
+  const displayNameField = authField('表示名', displayName, '猫');
+  const emailField = authField('メールアドレス', email, '✉');
+  const passwordField = authField('パスワード', password, '●', forgot);
   const heading = el('h2', { textContent: 'ログイン' });
+  const sheetDescription = el('p', { textContent: '登録したアカウントで続ける' });
+  const step = el('span', { class: 'auth-v2-step', textContent: 'いつもの街へ' });
+  const eyebrow = el('span', { class: 'auth-v2-eyebrow', textContent: 'WELCOME BACK' });
+  const heroLine1 = el('span', { textContent: 'おかえりなさい。' });
+  const heroLine2 = el('span', { textContent: '今日も一緒に進もう。' });
+  const heroHeading = el('h1', {}, [heroLine1, heroLine2]);
+  const heroDescription = el('p', { textContent: '記録も貯金も、あなたの街で待っています。' });
+  const switchLead = el('span', { textContent: 'はじめて使う方は' });
+  const terms = el('div', { class: 'auth-v2-terms' }, [
+    el('b', { textContent: '✓', 'aria-hidden': 'true' } as any),
+    el('span', {}, [
+      el('a', { href: '/terms.html', target: '_blank', textContent: '利用規約' }),
+      ' と ',
+      el('a', { href: '/privacy.html', target: '_blank', textContent: 'プライバシーポリシー' }),
+      ' に同意して登録します。',
+    ]),
+  ]);
+  const secure = el('div', { class: 'auth-v2-secure', textContent: '入力情報は安全に保護されます' });
+  const inviteNotice = inviteTokenFromLocation()
+    ? el('p', {
+        class: 'auth-v2-invite',
+        textContent: '招待された家計簿スペースに参加します',
+      })
+    : null;
+
+  const form = el('form', { class: 'auth-v2-sheet' }, [
+    el('div', { class: 'auth-v2-handle', 'aria-hidden': 'true' } as any),
+    el('div', { class: 'auth-v2-sheet-head' }, [
+      el('div', {}, [heading, sheetDescription]),
+      step,
+    ]),
+    ...(inviteNotice ? [inviteNotice] : []),
+    displayNameField,
+    emailField,
+    passwordField,
+    terms,
+    errBox,
+    submit,
+    el('p', { class: 'auth-v2-switch' }, [switchLead, ' ', toggle]),
+    secure,
+  ]);
+
+  const page = el('section', { class: 'auth-v2-page' }, [
+    el('div', { class: 'auth-v2-scene', 'aria-hidden': 'true' } as any),
+    el('div', { class: 'auth-v2-shade', 'aria-hidden': 'true' } as any),
+    el('div', { class: 'auth-v2-brand' }, [
+      el('img', { src: '/icons/icon-192.png', alt: '' }),
+      el('div', {}, [
+        el('strong', { textContent: 'MANEKO' }),
+        el('small', { textContent: 'マネコ家計簿' }),
+      ]),
+    ]),
+    el('div', { class: 'auth-v2-hero' }, [eyebrow, heroHeading, heroDescription]),
+    el('img', {
+      class: 'auth-v2-maneko',
+      src: '/assets/kids/maneko-3d.webp',
+      alt: 'マネコ',
+    }),
+    form,
+  ]);
 
   const setMode = (m: 'login' | 'register') => {
     mode = m;
-    heading.textContent = submit.textContent = m === 'login' ? 'ログイン' : '新規登録';
-    toggle.textContent = m === 'login' ? 'アカウントを作る' : 'ログインに戻る';
-    displayNameField.style.display = m === 'register' ? '' : 'none';
-    email.type = m === 'register' ? 'email' : 'text';
-    email.placeholder = m === 'register' ? 'name@example.com' : 'メールアドレス（旧ユーザーはユーザー名）';
-    password.setAttribute('autocomplete', m === 'register' ? 'new-password' : 'current-password');
+    const register = m === 'register';
+    page.classList.toggle('is-register', register);
+    heading.textContent = register ? 'アカウントを作る' : 'ログイン';
+    sheetDescription.textContent = register
+      ? 'アプリ内では表示名が使われます'
+      : '登録したアカウントで続ける';
+    step.textContent = register ? '無料ではじめる' : 'いつもの街へ';
+    eyebrow.textContent = register ? 'START YOUR JOURNEY' : 'WELCOME BACK';
+    heroLine1.textContent = register ? 'マネコと、お金の旅を' : 'おかえりなさい。';
+    heroLine2.textContent = register ? 'はじめよう。' : '今日も一緒に進もう。';
+    heroDescription.textContent = register
+      ? '小さな記録が、街の変化につながります。'
+      : '記録も貯金も、あなたの街で待っています。';
+    submit.textContent = register ? 'アカウントを作る' : 'マネコタウンへ';
+    toggle.textContent = register ? 'ログイン' : 'アカウントを作る';
+    switchLead.textContent = register ? 'すでにアカウントがある方は' : 'はじめて使う方は';
+    displayNameField.hidden = !register;
+    terms.hidden = !register;
+    secure.hidden = register;
+    forgot.hidden = register;
+    email.type = register ? 'email' : 'text';
+    email.placeholder = register ? 'name@example.com' : 'メールアドレス（旧ユーザーはユーザー名）';
+    password.placeholder = register ? '8文字以上' : 'パスワード';
+    password.type = 'password';
+    eye.textContent = '👁';
+    eye.setAttribute('aria-label', 'パスワードを表示');
+    password.setAttribute('autocomplete', register ? 'new-password' : 'current-password');
     errBox.style.display = 'none';
   };
   toggle.addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
@@ -3386,28 +3535,10 @@ function renderAuth() {
   });
   setMode('login');
 
-  const form = el('form', { class: 'card auth-card' }, [
-    heading,
-    el('p', { class: 'muted', textContent: inviteTokenFromLocation()
-      ? '招待された家計簿スペースに参加するには、ログインまたは新規登録してください。'
-      : '家計簿スペースを共有して、ふたりでも家族でも一緒に記録できます。' }),
-    labeled('メールアドレス', email),
-    displayNameField,
-    labeled('パスワード', password),
-    errBox,
-    el('div', { class: 'row between' }, [toggle, submit]),
-    forgot,
-    el('p', { class: 'auth-legal muted' }, [
-      '登録すると ',
-      el('a', { href: '/terms.html', target: '_blank', textContent: '利用規約' }),
-      ' と ',
-      el('a', { href: '/privacy.html', target: '_blank', textContent: 'プライバシーポリシー' }),
-      ' に同意したものとみなされます。',
-    ]),
-  ]);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errBox.style.display = 'none';
+    submit.setAttribute('disabled', 'true');
     try {
       const res = mode === 'login'
         ? await api.login({ email: email.value, password: password.value })
@@ -3420,11 +3551,12 @@ function renderAuth() {
       }
       await boot();
     } catch (err) {
+      submit.removeAttribute('disabled');
       errBox.textContent = (err as Error).message;
       errBox.style.display = 'block';
     }
   });
-  app().replaceChildren(el('section', { class: 'auth-wrap' }, [form]));
+  app().replaceChildren(page);
 }
 
 async function renderAuthAction(): Promise<boolean> {
@@ -3432,6 +3564,7 @@ async function renderAuthAction(): Promise<boolean> {
   const params = new URLSearchParams(location.search);
   const action = params.get('action');
   const token = params.get('token') ?? '';
+  document.body.classList.remove('theme-auth', 'theme-kids', 'theme-adult');
   document.documentElement.style.background = document.body.style.background = '';
 
   const card = el('section', { class: 'auth-wrap' }, [
