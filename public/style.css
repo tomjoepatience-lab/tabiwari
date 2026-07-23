@@ -2118,10 +2118,10 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .kids-photo-scene {
   position: absolute;
-  inset: 0 0 auto;
-  height: 395px;
+  inset: 0;
+  height: auto;
   overflow: hidden;
-  z-index: -1;
+  z-index: 0;
 }
 .kids-photo-scene-bg {
   position: absolute;
@@ -2131,13 +2131,14 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   transform: scale(1.02);
 }
 .kids-photo-record .kids-photo-scene-bg { background-image: url("/assets/kids/scene-record.webp"); background-position: center 50%; }
+.kids-photo-report .kids-photo-scene-bg { background-image: url("/assets/kids/scene-record.webp"); background-position: center 44%; }
 .kids-photo-savings .kids-photo-scene-bg { background-image: url("/assets/kids/scene-savings.webp"); background-position: center 50%; }
 .kids-photo-family .kids-photo-scene-bg { background-image: url("/assets/kids/scene-family.webp"); background-position: center 50%; }
 .kids-photo-settings .kids-photo-scene-bg { background-image: url("/assets/kids/scene-settings.webp"); background-position: center 50%; }
 .kids-photo-scene-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg,rgba(31,25,18,.04),rgba(31,25,18,.02) 55%,rgba(54,36,18,.24));
+  background: linear-gradient(180deg,rgba(31,25,18,.03),rgba(31,25,18,.05) 42%,rgba(47,30,14,.38) 100%);
 }
 .kids-photo-settings .kids-photo-scene-shade {
   background: linear-gradient(90deg,rgba(29,24,29,.7),rgba(27,35,54,.3)),linear-gradient(0deg,rgba(15,20,33,.3),transparent);
@@ -2149,24 +2150,23 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   object-position: bottom;
   filter: drop-shadow(0 12px 12px rgba(43,25,10,.28));
 }
-.kids-photo-record .kids-photo-scene-maneko { width: 195px; height: 260px; right: -5px; bottom: 34px; }
-.kids-photo-savings .kids-photo-scene-maneko { width: 176px; height: 250px; left: 50%; bottom: 42px; transform: translateX(-50%); }
-.kids-photo-family .kids-photo-scene-maneko { width: 178px; height: 248px; right: -1px; bottom: 27px; }
-.kids-photo-settings .kids-photo-scene-maneko { width: 225px; height: 285px; left: 50%; bottom: 4px; transform: translateX(-50%); }
+.kids-photo-record .kids-photo-scene-maneko,
+.kids-photo-report .kids-photo-scene-maneko { width: 195px; height: 260px; right: -5px; top: 58px; }
+.kids-photo-savings .kids-photo-scene-maneko { width: 176px; height: 250px; left: 50%; top: 54px; transform: translateX(-50%); }
+.kids-photo-family .kids-photo-scene-maneko { width: 178px; height: 248px; right: -1px; top: 61px; }
+.kids-photo-settings .kids-photo-scene-maneko { width: 225px; height: 285px; left: 50%; top: 28px; transform: translateX(-50%); }
 .kids-photo-sheet {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 322px;
+  left: 0;
+  right: 0;
+  top: 270px;
   bottom: 0;
   z-index: 5;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,.78);
-  border-radius: 28px 28px 0 0;
-  background:
-    radial-gradient(circle at 25% 0,rgba(255,255,255,.8),transparent 34%),
-    linear-gradient(180deg,#fff9eb,#f8eed9);
-  box-shadow: 0 -4px 20px rgba(77,47,18,.16),inset 0 1px 0 #fff;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .kids-photo-scroll {
   position: absolute;
@@ -2175,10 +2175,28 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   overscroll-behavior-y: contain;
+  display: block;
+  padding: 12px 12px calc(102px + env(safe-area-inset-bottom) + var(--kb,0px));
+}
+.kids-photo-content-card {
   display: flex;
   flex-direction: column;
   gap: 11px;
-  padding: 16px 14px calc(118px + env(safe-area-inset-bottom) + var(--kb,0px));
+  padding: 16px 14px 18px;
+  border: 1px solid rgba(255,255,255,.86);
+  border-radius: 27px;
+  background:
+    radial-gradient(circle at 24% 0,rgba(255,255,255,.72),transparent 38%),
+    rgba(255,248,233,.94);
+  box-shadow: 0 10px 28px rgba(65,40,17,.24),inset 0 1px 0 #fff;
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+}
+.kids-photo-page > .kids-nav-v3 {
+  bottom: max(0px, env(safe-area-inset-bottom));
+  z-index: 1200;
+  background: rgba(255,250,239,.97);
+  box-shadow: 0 10px 28px rgba(45,30,15,.3);
 }
 .kids-photo-title {
   margin: 0 0 2px;
@@ -2228,10 +2246,28 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   font-family: inherit;
 }
-.kids-photo-category span { font-size: 17px; }
+.kids-line-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  color: currentColor;
+}
+.kids-line-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.kids-photo-category .kids-line-icon { width: 19px; height: 19px; }
 .kids-photo-category strong { font-size: 10px; white-space: nowrap; }
 .kids-photo-category.active {
   border-color: #ef9e18;
@@ -2261,7 +2297,7 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   gap: 9px;
   font-size: 14px;
 }
-.kids-photo-row-icon { color: #8b5d2a; font-size: 18px; }
+.kids-photo-row-icon { width: 20px; height: 20px; color: #8b5d2a; }
 .kids-photo-detected {
   display: none;
   margin: -5px 6px 0;
@@ -2286,7 +2322,8 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   border-bottom: 1px solid #eadcc4;
   background: transparent;
   color: #674522;
-  display: flex;
+  display: grid;
+  grid-template-columns: 24px 48px minmax(0,1fr) 14px;
   align-items: center;
   gap: 9px;
   font-family: inherit;
@@ -2297,13 +2334,14 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 .kids-photo-row-value,
 .kids-photo-native-input {
   min-width: 0;
-  margin-left: auto;
+  margin-left: 0;
   color: #704b27;
   font: 700 10px "M PLUS Rounded 1c",sans-serif;
   text-align: right;
 }
 .kids-photo-native-input {
-  max-width: 178px;
+  width: 100%;
+  max-width: none;
   height: 34px;
   padding: 2px 4px;
   border: 0 !important;
@@ -2311,6 +2349,30 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   box-shadow: none !important;
 }
 .kids-photo-chevron { margin-left: 2px; font-size: 18px; color: #9a784f; }
+.kids-record-mode-switch {
+  align-self: center;
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  width: 178px;
+  padding: 3px;
+  border: 1px solid rgba(224,197,154,.9);
+  border-radius: 999px;
+  background: rgba(239,221,190,.72);
+}
+.kids-record-mode-switch button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #8a6841;
+  font: 800 10px "M PLUS Rounded 1c",sans-serif;
+}
+.kids-record-mode-switch button.active {
+  background: #fffaf0;
+  color: #714514;
+  box-shadow: 0 2px 7px rgba(96,57,15,.12);
+}
 .kids-photo-primary {
   border: 1px solid #f0a41d;
   background: linear-gradient(180deg,#ffad25,#ef8a05);
@@ -2412,24 +2474,75 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .kids-goal-icon-option {
   min-width: 0;
-  padding: 3px 2px 5px;
+  aspect-ratio: 1;
+  padding: 5px;
   border: 1px solid #ead7b5;
   border-radius: 10px;
   background: #fffaf0;
   color: #79552e;
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 1px;
   font-family: inherit;
 }
-.kids-goal-icon-option img { width: 42px; height: 42px; object-fit: contain; }
-.kids-goal-icon-option span { font-size: 7px; font-weight: 800; }
+.kids-goal-icon-option img { width: 100%; height: 100%; max-width: 50px; max-height: 50px; object-fit: contain; }
 .kids-goal-icon-option.active {
   border-color: #ef9e18;
   background: #fff0cf;
   box-shadow: inset 0 0 0 1px #ffc45d;
 }
+
+/* Kids report: adult report information, reduced to one glance. */
+.kids-report-summary {
+  padding: 15px 17px;
+  border-radius: 18px;
+  background: linear-gradient(145deg,rgba(60,45,31,.96),rgba(43,35,28,.96));
+  color: #fff9e9;
+  box-shadow: 0 8px 18px rgba(45,29,15,.25);
+  display: flex;
+  flex-direction: column;
+}
+.kids-report-summary span { color: #d8c7ad; font-size: 10px; font-weight: 800; }
+.kids-report-summary strong { margin: 2px 0; font-size: 30px; line-height: 1.2; }
+.kids-report-summary small { color: #e7d9c3; font-size: 9px; font-weight: 700; }
+.kids-report-card {
+  padding: 13px;
+  border: 1px solid #ead7b5;
+  border-radius: 16px;
+  background: rgba(255,250,239,.8);
+  box-shadow: 0 3px 9px rgba(92,59,20,.08);
+}
+.kids-report-card h2 { margin: 0 0 10px; color: #654322; font-size: 12px; }
+.kids-report-category-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 66px;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+}
+.kids-report-category-row > span { font-size: 9px; font-weight: 800; }
+.kids-report-category-row > div { height: 8px; overflow: hidden; border-radius: 999px; background: #eadfc9; }
+.kids-report-category-row i { display: block; height: 100%; border-radius: inherit; background: var(--bar-color); }
+.kids-report-category-row strong { text-align: right; font-size: 9px; }
+.kids-report-trend {
+  height: 116px;
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  align-items: end;
+  gap: 9px;
+}
+.kids-report-trend > div { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.kids-report-trend strong { width: 100%; overflow: hidden; color: #8a6841; font-size: 7px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.kids-report-trend i { width: 22px; max-height: 76px; margin: 4px 0; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg,#ffc155,#ec9015); }
+.kids-report-trend span { color: #8a6841; font-size: 8px; font-weight: 800; }
+.kids-report-record-button {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.kids-report-record-button .kids-line-icon { width: 18px; height: 18px; }
 
 /* Family screen */
 .kids-family-connection { display: grid; grid-template-columns: 1fr 100px 1fr; align-items: center; margin: -3px 10px 0; }
@@ -2517,8 +2630,12 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 .kids-photo-settings-body { display: flex; flex-direction: column; gap: 10px; padding: 0 9px 10px; }
 
 @media (max-height: 760px) {
-  .kids-photo-sheet { top: 292px; }
-  .kids-photo-scene { height: 350px; }
+  .kids-photo-sheet { top: 208px; }
+  .kids-photo-record .kids-photo-scene-maneko,
+  .kids-photo-report .kids-photo-scene-maneko { top: 18px; }
+  .kids-photo-savings .kids-photo-scene-maneko,
+  .kids-photo-family .kids-photo-scene-maneko { top: 14px; }
+  .kids-photo-settings .kids-photo-scene-maneko { top: -5px; }
 }
 
 /* Home proportions from the approved single-screen concept. */

@@ -177,6 +177,53 @@ def crop_icon_sheet(source: Path, output_dir: Path) -> None:
         canvas.save(output_dir / f"{name}.webp", "WEBP", quality=92, method=6)
 
 
+def normalize_individual_icon(source: Path, output: Path) -> None:
+    """Center one already-keyed icon without ever touching a neighboring icon."""
+    icon = Image.open(source).convert("RGBA")
+    alpha = icon.getchannel("A")
+    bbox = alpha.getbbox()
+    if bbox:
+        icon = icon.crop(bbox)
+    icon.thumbnail((220, 220), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    canvas.alpha_composite(icon, ((canvas.width - icon.width) // 2, (canvas.height - icon.height) // 2))
+
+    # Chroma removal around bicycle spokes and other thin details can leave
+    # isolated colored pixels. Remove only tiny disconnected alpha islands;
+    # the actual icon remains one or a few substantial connected components.
+    pixels = canvas.load()
+    seen: set[tuple[int, int]] = set()
+    for y in range(canvas.height):
+        for x in range(canvas.width):
+            if (x, y) in seen or pixels[x, y][3] < 18:
+                continue
+            stack = [(x, y)]
+            seen.add((x, y))
+            component: list[tuple[int, int]] = []
+            while stack:
+                current_x, current_y = stack.pop()
+                component.append((current_x, current_y))
+                for offset_y in (-1, 0, 1):
+                    for offset_x in (-1, 0, 1):
+                        next_x = current_x + offset_x
+                        next_y = current_y + offset_y
+                        if (
+                            0 <= next_x < canvas.width
+                            and 0 <= next_y < canvas.height
+                            and (next_x, next_y) not in seen
+                            and pixels[next_x, next_y][3] >= 18
+                        ):
+                            seen.add((next_x, next_y))
+                            stack.append((next_x, next_y))
+            if len(component) < 10:
+                for component_x, component_y in component:
+                    red, green, blue, _ = pixels[component_x, component_y]
+                    pixels[component_x, component_y] = (red, green, blue, 0)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output, "WEBP", quality=94, method=6)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--town-sheet", type=Path, required=True)

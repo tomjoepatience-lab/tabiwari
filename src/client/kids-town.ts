@@ -59,7 +59,7 @@ export function wireNav(canvas: HTMLElement, goTab: (tab: KidsTab) => void) {
   });
 }
 
-export type KidsPhotoScene = 'record' | 'savings' | 'family' | 'settings';
+export type KidsPhotoScene = 'record' | 'report' | 'savings' | 'family' | 'settings';
 
 export function kidsPhotoShell(options: {
   active: KidsTab;
@@ -70,6 +70,7 @@ export function kidsPhotoShell(options: {
 }): HTMLElement[] {
   const pose: Record<KidsPhotoScene, string> = {
     record: 'receipt',
+    report: 'receipt',
     savings: 'walking',
     family: 'family',
     settings: 'settings',
@@ -87,7 +88,10 @@ export function kidsPhotoShell(options: {
       ${kidsNavHtml(options.active, options.family)}
     </main>`;
   const { wrap, canvas, refit } = phoneCanvas(html, { bg: '#f7edd9', fillHeight: true });
-  canvas.querySelector<HTMLElement>('.kids-photo-scroll')!.append(...options.body);
+  const content = document.createElement('div');
+  content.className = 'kids-photo-content-card';
+  content.append(...options.body);
+  canvas.querySelector<HTMLElement>('.kids-photo-scroll')!.append(content);
   wireNav(canvas, options.goTab);
   // 中身を追加した後に実画面高へ合わせる。これが無いとiPhoneでスクロール領域と
   // 下部ナビが840px基準のまま残り、目標入力やタブ下端が画面外へ落ちる。

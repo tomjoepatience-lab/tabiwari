@@ -219,9 +219,38 @@ function wrapPhone(mode: AppMode, active: HomeTab, panels: HTMLElement[]): HTMLE
   return [wrap];
 }
 
+type KidsLineIconName =
+  | 'food' | 'transport' | 'shopping' | 'more'
+  | 'camera' | 'calendar' | 'pin' | 'group' | 'chart';
+
+function kidsLineIcon(name: KidsLineIconName, extraClass = ''): HTMLElement {
+  const paths: Record<KidsLineIconName, string> = {
+    food: '<path d="M5 3v7M8 3v7M5 7h3M6.5 10v11M15 3v18M15 3c3 2 4 5 4 8h-4"/>',
+    transport: '<path d="M4 15h16l-2-6H6l-2 6Zm2-6 2-4h8l2 4M7 15v3M17 15v3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',
+    shopping: '<path d="M5 8h14l-1 12H6L5 8Zm4 0V6a3 3 0 0 1 6 0v2"/>',
+    more: '<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
+    camera: '<path d="M4 7h4l2-3h4l2 3h4v12H4V7Z"/><circle cx="12" cy="13" r="4"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4M17 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>',
+    pin: '<path d="M12 22s7-6 7-13a7 7 0 1 0-14 0c0 7 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/>',
+    group: '<path d="M4 20v-2a4 4 0 0 1 4-4h3a4 4 0 0 1 4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM16 7a3 3 0 0 1 0 6M17 14h1a3 3 0 0 1 3 3v3"/>',
+    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  };
+  const icon = el('span', { class: `kids-line-icon${extraClass ? ` ${extraClass}` : ''}` });
+  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name]}</svg>`;
+  return icon;
+}
+
+function kidsRecordModeSwitch(active: 'record' | 'report'): HTMLElement {
+  const record = el('button', { type: 'button', class: active === 'record' ? 'active' : '', textContent: '記録' });
+  const report = el('button', { type: 'button', class: active === 'report' ? 'active' : '', textContent: 'レポート' });
+  record.addEventListener('click', () => { homeTab = 'add'; void renderHome(); });
+  report.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
+  return el('div', { class: 'kids-record-mode-switch' }, [record, report]);
+}
+
 function kidsRecordPhoto(o: Overview): HTMLElement[] {
   const categories = ['食費', '交通', '買い物', 'その他'];
-  const icons: Record<string, string> = { 食費: '🍴', 交通: '▣', 買い物: '🛍', その他: '••' };
+  const icons: Record<string, KidsLineIconName> = { 食費: 'food', 交通: 'transport', 買い物: 'shopping', その他: 'more' };
   let category = categories[0];
   let ocrItems: { name: string; price: number }[] = [];
   let storeName = '';
@@ -232,7 +261,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
   const categoryRow = el('div', { class: 'kids-photo-categories' });
   const drawCategories = () => categoryRow.replaceChildren(...categories.map((name) => {
     const button = el('button', { type: 'button', class: 'kids-photo-category' + (name === category ? ' active' : '') }, [
-      el('span', { textContent: icons[name] }),
+      kidsLineIcon(icons[name]),
       el('strong', { textContent: name }),
     ]);
     button.addEventListener('click', () => { category = name; drawCategories(); });
@@ -243,7 +272,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
   const receiptInput = el('input', { type: 'file', accept: 'image/*' });
   receiptInput.style.display = 'none';
   const receiptButton = el('button', { type: 'button', class: 'kids-photo-wide-row' }, [
-    el('span', { class: 'kids-photo-row-icon', textContent: '📷' }),
+    kidsLineIcon('camera', 'kids-photo-row-icon'),
     el('strong', { textContent: 'レシートを読み取る' }),
   ]);
   const receiptStatus = el('p', { class: 'kids-photo-detected' });
@@ -279,7 +308,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
 
   const placeValue = el('span', { class: 'kids-photo-row-value', textContent: '未設定' });
   const placeRow = el('button', { type: 'button', class: 'kids-photo-info-row' }, [
-    el('span', { class: 'kids-photo-row-icon', textContent: '●' }),
+    kidsLineIcon('pin', 'kids-photo-row-icon'),
     el('strong', { textContent: '場所' }),
     placeValue,
     el('span', { class: 'kids-photo-chevron', textContent: '›' }),
@@ -329,6 +358,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
   });
 
   const body = [
+    kidsRecordModeSwitch('record'),
     el('h1', { class: 'kids-photo-title', textContent: '支出を記録' }),
     el('div', { class: 'kids-photo-price' }, [el('span', { textContent: '¥' }), amount]),
     categoryRow,
@@ -337,20 +367,84 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
     receiptStatus,
     el('div', { class: 'kids-photo-info-box' }, [
       el('label', { class: 'kids-photo-info-row' }, [
-        el('span', { class: 'kids-photo-row-icon', textContent: '▦' }),
+        kidsLineIcon('calendar', 'kids-photo-row-icon'),
         el('strong', { textContent: '日付' }),
         date,
+        el('span', { class: 'kids-photo-chevron', textContent: '›' }),
       ]),
       placeRow,
       ...(myGroups.length > 1 ? [el('label', { class: 'kids-photo-info-row' }, [
-        el('span', { class: 'kids-photo-row-icon', textContent: '⌂' }),
+        kidsLineIcon('group', 'kids-photo-row-icon'),
         el('strong', { textContent: '保存先' }),
         groupSelect,
+        el('span', { class: 'kids-photo-chevron', textContent: '›' }),
       ])] : []),
     ]),
     save,
   ];
   return kidsPhotoShell({ active: 'add', family: o.settings?.usage_type !== 'personal', scene: 'record', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
+}
+
+function kidsReportPhoto(o: Overview, recent: RecentReceipt[]): HTMLElement[] {
+  const now = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const thisMonth = recent.filter((receipt) => receipt.purchased_on.startsWith(currentKey));
+  const days = new Set(thisMonth.map((receipt) => receipt.purchased_on.slice(0, 10))).size;
+  const topCategories = o.month.byCategory.slice(0, 4);
+  const maxCategory = Math.max(1, ...topCategories.map((item) => item.total));
+  const categoryRows = topCategories.length
+    ? topCategories.map((item, index) => {
+        const fill = el('i');
+        fill.style.width = `${Math.max(5, Math.round(item.total / maxCategory * 100))}%`;
+        fill.style.setProperty('--bar-color', ['#ef9a20', '#cfaa57', '#90a968', '#c88768'][index] ?? '#ef9a20');
+        return el('div', { class: 'kids-report-category-row' }, [
+          el('span', { textContent: item.category }),
+          el('div', {}, [fill]),
+          el('strong', { textContent: yen(item.total) }),
+        ]);
+      })
+    : [el('p', { class: 'kids-photo-empty', textContent: '今月の記録はまだありません' })];
+
+  const monthValues: Array<{ label: string; total: number }> = [];
+  for (let offset = 3; offset >= 0; offset--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    monthValues.push({
+      label: `${date.getMonth() + 1}月`,
+      total: recent.filter((receipt) => receipt.purchased_on.startsWith(key)).reduce((sum, receipt) => sum + receipt.total, 0),
+    });
+  }
+  const maxMonth = Math.max(1, ...monthValues.map((item) => item.total));
+  const trend = el('div', { class: 'kids-report-trend' }, monthValues.map((item) =>
+    el('div', {}, [
+      el('strong', { textContent: item.total ? yen(item.total) : '—' }),
+      el('i', { style: `height:${Math.max(8, Math.round(item.total / maxMonth * 76))}px` } as any),
+      el('span', { textContent: item.label }),
+    ])));
+  const backToRecord = el('button', { type: 'button', class: 'kids-photo-secondary kids-report-record-button' }, [
+    kidsLineIcon('camera'),
+    el('strong', { textContent: '記録画面へ戻る' }),
+  ]);
+  backToRecord.addEventListener('click', () => { homeTab = 'add'; void renderHome(); });
+  const body = [
+    kidsRecordModeSwitch('report'),
+    el('h1', { class: 'kids-photo-title', textContent: 'レポート' }),
+    el('section', { class: 'kids-report-summary' }, [
+      el('span', { textContent: `${now.getMonth() + 1}月の支出` }),
+      el('strong', { textContent: yen(o.month.spend) }),
+      el('small', { textContent: `記録した日 ${days}日 ・ ${thisMonth.length}件` }),
+    ]),
+    el('section', { class: 'kids-report-card' }, [
+      el('h2', { textContent: 'つかいみち' }),
+      ...categoryRows,
+    ]),
+    el('section', { class: 'kids-report-card' }, [
+      el('h2', { textContent: '4か月の変化' }),
+      trend,
+    ]),
+    backToRecord,
+  ];
+  return kidsPhotoShell({ active: 'add', family: o.settings?.usage_type !== 'personal', scene: 'report', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
 }
 
 function kidsSavingsPhoto(o: Overview): HTMLElement[] {
@@ -432,7 +526,6 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   const drawIconPicker = () => iconPicker.replaceChildren(...iconOptions.map((option) => {
     const button = el('button', { type: 'button', class: 'kids-goal-icon-option' + (selectedEmoji === option.emoji ? ' active' : ''), 'aria-label': option.label } as any, [
       el('img', { src: `/assets/kids/goal-${option.key}.webp`, alt: '' }),
-      el('span', { textContent: option.label }),
     ]);
     button.addEventListener('click', () => { selectedEmoji = option.emoji; drawIconPicker(); });
     return button;
@@ -916,7 +1009,7 @@ async function renderHome() {
     const sections = mode === 'adult'
       ? [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]
       : [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, true, incomes)]; // こどももジャンル別（手直しなし）
-    panels = wrapPhone(mode, homeTab, sections);
+    panels = mode === 'kids' ? kidsReportPhoto(o, recent) : wrapPhone(mode, homeTab, sections);
   } else if (homeTab === 'savings') {
     panels = mode === 'kids' ? kidsSavingsPhoto(o) : wrapPhone(mode, homeTab, savingsPanel(o, mode));
   } else {
