@@ -1652,20 +1652,27 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   font-weight: 700;
   line-height: 1.65;
 }
-.tut-next {
+.tut-card .tut-next {
   width: 100%;
   min-height: 45px;
-  border: 0;
+  border: 0 !important;
   border-radius: 15px;
-  background: linear-gradient(135deg,#f5ad27,#e88a16);
+  background: linear-gradient(135deg,#f5ad27,#e88a16) !important;
   box-shadow: 0 7px 15px rgba(196,111,11,.24), inset 0 1px rgba(255,255,255,.45);
-  color: #fff;
+  color: #fff !important;
   font: inherit;
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
 }
-.tut-next:disabled { opacity: .58; cursor: wait; }
+.tut-card .tut-next:hover,
+.tut-card .tut-next:focus,
+.tut-card .tut-next:active {
+  background: linear-gradient(135deg,#f8b737,#e98512) !important;
+  color: #fff !important;
+  filter: none;
+}
+.tut-card .tut-next:disabled { opacity: .58; cursor: wait; }
 .tut-nav {
   display: flex;
   align-items: center;
@@ -1753,6 +1760,114 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 @keyframes tut-card-in {
   from { opacity: 0; transform: translateY(12px) scale(.98); }
   to { opacity: 1; transform: none; }
+}
+
+/* Web/PWAの初期ロード。Expo版は同じ構成をネイティブ側でも描画する。 */
+.boot-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 39%, rgba(255,255,255,.96) 0 15%, rgba(255,246,211,.76) 32%, transparent 54%),
+    linear-gradient(180deg,#fff9ea 0%,#ffe6ac 64%,#f4c65e 100%);
+  color: #65421e;
+  font-family: "M PLUS Rounded 1c",sans-serif;
+}
+.boot-loader-glow {
+  position: absolute;
+  width: 230px;
+  height: 230px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.47);
+  filter: blur(3px);
+  animation: boot-glow 1.8s ease-in-out infinite;
+}
+.boot-loader-stage {
+  position: relative;
+  width: 210px;
+  height: 245px;
+  display: grid;
+  place-items: center;
+}
+.boot-loader-maneko {
+  position: relative;
+  z-index: 2;
+  width: 148px;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 10px rgba(109,70,21,.2));
+  transform-origin: 50% 88%;
+  animation: boot-maneko 1.15s ease-in-out infinite;
+}
+.boot-loader-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 19px;
+  width: 94px;
+  height: 19px;
+  border-radius: 50%;
+  background: rgba(112,73,22,.18);
+  filter: blur(3px);
+  animation: boot-shadow 1.15s ease-in-out infinite;
+}
+.boot-loader-coin {
+  position: absolute;
+  z-index: 3;
+  width: 31px;
+  height: 31px;
+  border: 2px solid rgba(255,255,255,.72);
+  border-radius: 50%;
+  background: linear-gradient(145deg,#ffda57,#e89417);
+  color: #fff5c4;
+  box-shadow: 0 5px 10px rgba(155,87,7,.2),inset 0 1px 2px rgba(255,255,255,.65);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 900;
+  animation: boot-coin 1.5s ease-in-out infinite;
+}
+.boot-loader-coin.c1 { left: 12px; top: 68px; animation-delay: -.25s; }
+.boot-loader-coin.c2 { right: 11px; top: 36px; animation-delay: -.85s; }
+.boot-loader-coin.c3 { right: 2px; top: 140px; width: 23px; height: 23px; font-size: 10px; animation-delay: -1.2s; }
+.boot-loader h1 { position: relative; margin: 5px 0 3px; color: #65421e; font-size: 17px; font-weight: 900; letter-spacing: .03em; }
+.boot-loader p { position: relative; margin: 0; color: #9b713d; font-size: 11px; font-weight: 800; }
+.boot-loader-dots { display: inline-flex; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.boot-loader-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #d9871a;
+  animation: boot-dot 1s ease-in-out infinite;
+}
+.boot-loader-dots i:nth-child(2) { animation-delay: .14s; }
+.boot-loader-dots i:nth-child(3) { animation-delay: .28s; }
+@keyframes boot-maneko {
+  0%,100% { transform: translateY(4px) rotate(-1.5deg); }
+  50% { transform: translateY(-10px) rotate(2deg); }
+}
+@keyframes boot-shadow {
+  0%,100% { opacity: .23; transform: translateX(-50%) scaleX(1); }
+  50% { opacity: .11; transform: translateX(-50%) scaleX(.76); }
+}
+@keyframes boot-coin {
+  0%,100% { opacity: .65; transform: translateY(6px) rotate(-8deg) scale(.9); }
+  50% { opacity: 1; transform: translateY(-9px) rotate(9deg) scale(1.05); }
+}
+@keyframes boot-glow {
+  0%,100% { opacity: .58; transform: scale(.92); }
+  50% { opacity: .92; transform: scale(1.06); }
+}
+@keyframes boot-dot {
+  0%,100% { opacity: .25; transform: translateY(1px); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot-loader * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 /* ======================================================================
    Maneko Town v4 — savings-driven town, journey and four-tab experience

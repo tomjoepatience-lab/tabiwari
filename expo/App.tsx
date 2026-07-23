@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   Linking,
   Modal,
   StatusBar,
@@ -61,6 +62,7 @@ export default function App() {
   const [placeResults, setPlaceResults] = useState<PlaceSearchResult[]>([]);
   const [placeSearching, setPlaceSearching] = useState(false);
   const [placeSearchMessage, setPlaceSearchMessage] = useState('');
+  const loaderProgress = useRef(new Animated.Value(0)).current;
 
   const points = mapRequest?.points ?? [];
   const initialRegion = useMemo<Region>(() => {
@@ -83,6 +85,31 @@ export default function App() {
     const sub = Linking.addEventListener('url', ({ url }) => openInvite(url));
     return () => sub.remove();
   }, [openInvite]);
+
+  useEffect(() => {
+    if (!loading) {
+      loaderProgress.setValue(0);
+      return undefined;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(loaderProgress, {
+          toValue: 1,
+          duration: 620,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(loaderProgress, {
+          toValue: 0,
+          duration: 620,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [loaderProgress, loading]);
 
   useEffect(() => {
     if (!mapRequest || !points.length) return;
@@ -230,6 +257,35 @@ export default function App() {
     );
   }
 
+  const loaderLift = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [5, -11],
+  });
+  const loaderTilt = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['-1.5deg', '2deg'],
+  });
+  const loaderShadowScale = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.74],
+  });
+  const loaderShadowOpacity = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.22, 0.1],
+  });
+  const loaderCoinLift = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [7, -9],
+  });
+  const loaderCoinSpin = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['-10deg', '10deg'],
+  });
+  const loaderGlowScale = loaderProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.92, 1.08],
+  });
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
@@ -259,8 +315,53 @@ export default function App() {
         }}
       />
       {loading && (
-        <View style={[StyleSheet.absoluteFill, styles.loadingOverlay]} pointerEvents="none">
-          <ActivityIndicator size="large" color="#E8B62B" />
+        <View
+          style={[StyleSheet.absoluteFill, styles.loadingOverlay]}
+          pointerEvents="none"
+          accessibilityLabel="マネコタウンを読み込み中"
+        >
+          <View style={styles.loaderStage}>
+            <Animated.View style={[styles.loaderGlow, { transform: [{ scale: loaderGlowScale }] }]} />
+            <Animated.View
+              style={[
+                styles.loaderCoin,
+                styles.loaderCoinLeft,
+                { transform: [{ translateY: loaderCoinLift }, { rotate: loaderCoinSpin }] },
+              ]}
+            >
+              <Text style={styles.loaderCoinText}>¥</Text>
+            </Animated.View>
+            <Animated.View
+              style={[
+                styles.loaderCoin,
+                styles.loaderCoinRight,
+                {
+                  transform: [
+                    { translateY: Animated.multiply(loaderCoinLift, -0.72) },
+                    { rotate: loaderCoinSpin },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.loaderCoinText}>¥</Text>
+            </Animated.View>
+            <Animated.Image
+              source={require('./assets/maneko-loader.png')}
+              resizeMode="contain"
+              style={[
+                styles.loaderManeko,
+                { transform: [{ translateY: loaderLift }, { rotate: loaderTilt }] },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.loaderShadow,
+                { opacity: loaderShadowOpacity, transform: [{ scaleX: loaderShadowScale }] },
+              ]}
+            />
+          </View>
+          <Text style={styles.loaderTitle}>マネコタウンを準備中</Text>
+          <Text style={styles.loaderMessage}>もうすぐ会えるにゃ…</Text>
         </View>
       )}
       <Modal visible={!!mapRequest} animationType="slide" presentationStyle="fullScreen">
@@ -386,7 +487,79 @@ const styles = StyleSheet.create({
   loadingOverlay: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff4d8',
+  },
+  loaderStage: {
+    width: 220,
+    height: 250,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  loaderGlow: {
+    position: 'absolute',
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    backgroundColor: 'rgba(255,255,255,0.58)',
+  },
+  loaderManeko: {
+    width: 158,
+    height: 225,
+    zIndex: 2,
+  },
+  loaderShadow: {
+    position: 'absolute',
+    bottom: 7,
+    width: 92,
+    height: 17,
+    borderRadius: 20,
+    backgroundColor: '#7a4d18',
+  },
+  loaderCoin: {
+    position: 'absolute',
+    zIndex: 3,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: '#eda526',
+    shadowColor: '#9b5707',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.22,
+    shadowRadius: 7,
+    elevation: 4,
+  },
+  loaderCoinLeft: {
+    left: 10,
+    top: 72,
+  },
+  loaderCoinRight: {
+    right: 8,
+    top: 43,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  loaderCoinText: {
+    color: '#fff4ba',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  loaderTitle: {
+    color: '#65421e',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  loaderMessage: {
+    marginTop: 4,
+    color: '#9b713d',
+    fontSize: 13,
+    fontWeight: '700',
   },
   errorContainer: {
     flex: 1,
