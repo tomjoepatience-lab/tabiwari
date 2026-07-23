@@ -752,6 +752,14 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
   ]);
   const reportBtn = el('button', { type: 'button', class: 'primary', textContent: '📊 支出レポートを開く' });
   reportBtn.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
+  const tutorialBtn = el('button', { type: 'button', class: 'kids-settings-tutorial-button', textContent: '🐱 チュートリアルをもう一度見る' });
+  tutorialBtn.addEventListener('click', () => {
+    const url = new URL(location.href);
+    url.searchParams.set('tutorial', '1');
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    homeTab = 'home';
+    void renderHome();
+  });
   const display = el('section', { class: 'card' }, [
     el('h2', { textContent: '▣ 表示' }),
     preferenceRow(
@@ -767,6 +775,7 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
       applyDisplayPreferences,
     ),
     reportBtn,
+    tutorialBtn,
   ]);
 
   const pages = {

@@ -3161,6 +3161,16 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   font-size: 9px;
   line-height: 1.55;
 }
+.kids-settings-tutorial-button {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #e2cda6;
+  border-radius: 13px;
+  background: rgba(255,249,235,.96);
+  color: #79552e;
+  font: 800 10px "M PLUS Rounded 1c",sans-serif;
+}
 .kids-photo-settings-body > .card > .row {
   align-items: stretch;
   flex-direction: column;
