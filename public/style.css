@@ -1708,6 +1708,13 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   border: 0;
   background: transparent;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.kids-town-open:hover,
+.kids-town-open:focus,
+.kids-town-open:active {
+  background: transparent;
+  outline: none;
 }
 .kids-home-v3-header,
 .kids-map-chip,
