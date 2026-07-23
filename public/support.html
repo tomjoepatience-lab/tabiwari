@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>サポート | マネコ</title><link rel="stylesheet" href="/legal.css"></head>
+<body><main>
+  <a class="back" href="/">← マネコへ戻る</a>
+  <h1>マネコ サポート</h1>
+  <p class="lead">不具合、アカウント、データの取り扱いについて、下のフォームからお問い合わせください。内容を確認後、入力されたメールアドレスへ返信します。</p>
+
+  <h2>よくあるご質問</h2>
+  <p><strong>パスワードを忘れた：</strong>ログイン画面の「パスワードを忘れた」から再設定できます。</p>
+  <p><strong>アカウントを削除したい：</strong>アプリの「メニュー → アカウント → アカウントを削除」から、関連する個人データを含めて削除できます。</p>
+  <p><strong>位置情報を止めたい：</strong>iPhoneの「設定 → プライバシーとセキュリティ → 位置情報サービス → マネコ」から変更できます。</p>
+
+  <h2>お問い合わせ</h2>
+  <form id="support-form">
+    <label>返信先メールアドレス<input id="email" type="email" autocomplete="email" required></label>
+    <label>お問い合わせ内容<textarea id="message" minlength="10" maxlength="2000" required placeholder="発生した画面、操作、表示されたメッセージなど"></textarea></label>
+    <label class="hp" aria-hidden="true">Webサイト<input id="website" tabindex="-1" autocomplete="off"></label>
+    <button id="submit" type="submit">送信する</button>
+    <p id="result" aria-live="polite"></p>
+  </form>
+  <p class="updated">送信された情報の取り扱いは<a href="/privacy.html">プライバシーポリシー</a>をご確認ください。</p>
+</main>
+<script>
+document.getElementById('support-form').addEventListener('submit', async function (event) {
+  event.preventDefault();
+  const button = document.getElementById('submit');
+  const result = document.getElementById('result');
+  button.disabled = true;
+  result.className = '';
+  result.textContent = '送信しています…';
+  try {
+    const response = await fetch('/api/auth/support', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('email').value,
+        message: document.getElementById('message').value,
+        website: document.getElementById('website').value
+      })
+    });
+    const body = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(body.error || '送信できませんでした');
+    result.className = 'success';
+    result.textContent = '送信しました。お問い合わせありがとうございます。';
+    event.target.reset();
+  } catch (error) {
+    result.className = 'error';
+    result.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script></body></html>

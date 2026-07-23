@@ -7,8 +7,7 @@ import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { canvasModal } from './records';
 import { featuredGoal, currentStage, journeyPercent, STAGES, openJourney } from './journey';
-import { manekoHtml, stageAccessoriesHtml } from './maneko';
-import { STAGE_INFO, stageSceneryHtml, stageBuyIconHtml } from './stage';
+import { STAGE_INFO } from './stage';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
@@ -110,24 +109,15 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
   const goal = fg && !fg.done ? fg : undefined;
   const goalPct = goal ? Math.min(100, Math.round((goal.saved / goal.target) * 100)) : 0;
 
-  // ステージ別の装備（首輪・帽子・王冠など）。300×370 のキャラ座標系でマネコに重ねる。
-  const acc = stageAccessoriesHtml(jStage);
-
-  // 買ったもの（最新のかいもの1件をステージ別アイコンのラベルに）
-  const buy1 = a.recent[0];
-  const buyLabel = (r: RecentReceipt) => `${(r.store_name || r.items[0]?.name || 'かいもの').slice(0, 7)} ${yen(r.total)}`;
-
   // コインの雨: お祝い / チャレンジ達成 / 黄金の都（達成ステージ）
   const coinRain = !!(a.celebrate || o.challengeDone) || jStage === 4;
 
   const html = `
-  <div style="position:relative;width:402px;height:840px;overflow:hidden;background:${d.sky};font-family:'M PLUS Rounded 1c', sans-serif;color:#4A3B28">
+  <div class="kids-home-3d" style="position:relative;width:402px;height:840px;overflow:hidden;background:${d.sky};font-family:'M PLUS Rounded 1c', sans-serif;color:#4A3B28">
 
-    <!-- v2 ステージ景色（太陽・雲・遠景・地面・道・建物・小物） z0-2 -->
-    ${stageSceneryHtml(jStage)}
-
-    <!-- 買ったもの（最新のかいもの・ステージ別アイコン） -->
-    ${buy1 ? stageBuyIconHtml(jStage, buyLabel(buy1)) : ''}
+    <!-- 3D マネコタウン。ステージ進行に合わせて彩度と光が増す -->
+    <div class="kids-town-3d kids-town-stage-${jStage}" aria-hidden="true"></div>
+    <div class="kids-town-vignette" aria-hidden="true"></div>
 
     <!-- コインの雨（お祝い / チャレンジ / 黄金の都） -->
     ${coinRain ? `
@@ -135,11 +125,10 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
     <div style="position:absolute;left:300px;top:-40px;z-index:3;animation:mfall 7.2s linear infinite;animation-delay:-3.1s;opacity:0">${coin(20)}</div>
     ` : ''}
 
-    <!-- マネコ（ステージ別装備）。中身は acc.back + 本体 + acc.front -->
-    <div id="k-cat" style="position:absolute;left:50%;bottom:132px;width:300px;height:370px;transform:translateX(-50%) scale(.66);transform-origin:bottom center;cursor:pointer;z-index:3">
-      ${acc.back}
-      ${manekoHtml({ collar: false })}
-      ${acc.front}
+    <!-- 3D マネコ。影と本体を分けてタップ時のジャンプを自然に見せる -->
+    <div id="k-cat" class="kids-maneko-wrap" aria-label="マネコをタップ">
+      <div id="m-cat-shadow" class="kids-maneko-shadow"></div>
+      <img id="m-cat-body" class="kids-maneko-3d" src="/assets/kids/maneko-3d.webp" alt="マネコ">
     </div>
 
     <!-- マネコのふきだし（じぶんからおしゃべりする） -->
@@ -195,29 +184,14 @@ export function kidsHome(a: KidsHomeArgs): HTMLElement[] {
         : `<span style="font-size:11.5px;font-weight:800;color:#7A4A00;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">⭐ きょうのチャレンジ: おかいもの メモ あと1回</span>`}
     </div>
 
-    <!-- 世界のしかけ: 掲示板（もくひょうづくり）と ぶたさんちょきんばこ -->
-    <div id="k-board" class="hv" style="position:absolute;left:10px;top:592px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;z-index:5">
-      <div style="position:relative;width:76px;height:66px">
-        <div style="position:absolute;left:12px;top:34px;width:8px;height:30px;background:linear-gradient(180deg,#B9743F,#94551F);border-radius:2px"></div>
-        <div style="position:absolute;right:12px;top:34px;width:8px;height:30px;background:linear-gradient(180deg,#B9743F,#94551F);border-radius:2px"></div>
-        <div style="position:absolute;left:0;top:0;width:76px;height:40px;background:linear-gradient(180deg,#D9A876,#B9895A);border:3px solid #8A4E1C;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#5A3A16;box-shadow:0 4px 8px rgba(120,70,20,.3)">もくひょう</div>
-        <div style="position:absolute;left:8px;top:6px;width:60px;height:3px;background:rgba(255,246,214,.5);border-radius:2px"></div>
-      </div>
-      <span style="font-size:11px;font-weight:800;color:#6B5638;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">けいじばん</span>
+    <!-- よく使う操作を、背景から浮く大きなガラスボタンに整理 -->
+    <div id="k-board" class="kids-world-action hv" style="left:12px" role="button" aria-label="目標をつくる">
+      <span class="kids-world-action-icon">🎯</span>
+      <span>もくひょう</span>
     </div>
-    <div id="k-pig" class="hv" style="position:absolute;right:10px;top:592px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;z-index:5">
-      <div style="position:relative;width:78px;height:62px">
-        <div style="position:absolute;left:6px;top:12px;width:66px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #FBD0E0, #F06292);box-shadow:inset -6px -8px 10px rgba(180,60,100,.28), 0 5px 10px rgba(180,60,100,.3)"></div>
-        <div style="position:absolute;left:16px;top:5px;width:15px;height:15px;background:#F06292;border-radius:50% 50% 0 50%;transform:rotate(12deg)"></div>
-        <div style="position:absolute;left:34px;top:8px;width:20px;height:5px;border-radius:3px;background:#B9506E"></div>
-        <div style="position:absolute;left:38px;top:-4px;width:15px;height:15px;border-radius:50%;border:2px solid #E8B62B;background:radial-gradient(circle at 35% 30%, #FFEFAE, #FFD54A 55%, #DFA318)"></div>
-        <div style="position:absolute;left:0;top:28px;width:19px;height:15px;border-radius:50%;background:#F8A8C0;border:2.5px solid #D96A8A"></div>
-        <div style="position:absolute;left:5px;top:33px;width:3px;height:4px;border-radius:2px;background:#B9506E"></div>
-        <div style="position:absolute;left:11px;top:33px;width:3px;height:4px;border-radius:2px;background:#B9506E"></div>
-        <div style="position:absolute;left:18px;top:54px;width:9px;height:8px;border-radius:0 0 4px 4px;background:#D96A8A"></div>
-        <div style="position:absolute;left:52px;top:54px;width:9px;height:8px;border-radius:0 0 4px 4px;background:#D96A8A"></div>
-      </div>
-      <span style="font-size:11px;font-weight:800;color:#B9506E;background:rgba(255,253,246,.9);border-radius:999px;padding:2px 10px">ちょきんばこ</span>
+    <div id="k-pig" class="kids-world-action hv" style="right:12px" role="button" aria-label="貯金する">
+      <span class="kids-world-action-icon">🐷</span>
+      <span>ちょきん</span>
     </div>
 
     <!-- せかいをみる（RPGの旅マップへ）。現在ステージ＆％も表示 -->

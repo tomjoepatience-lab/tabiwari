@@ -857,9 +857,32 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   });
   const logoutSec = el('section', { class: 'card' }, [
     el('h2', { textContent: 'アカウント' }),
+    el('p', { class: 'muted', textContent: currentUser?.email
+      ? `${currentUser.email}（${currentUser.email_verified ? '確認済み' : '未確認'}）`
+      : `表示名: ${currentUser?.username ?? ''}` }),
     el('div', { class: 'row' }, [logout, deleteAccount]),
     el('p', { class: 'muted', textContent: '削除すると、自分だけの家計簿データも削除され、元に戻せません。共有スペースは他のメンバーに残ります。' }),
+    el('div', { class: 'row' }, [
+      el('a', { href: '/privacy.html', target: '_blank', class: 'link-btn', textContent: 'プライバシー' }),
+      el('a', { href: '/terms.html', target: '_blank', class: 'link-btn', textContent: '利用規約' }),
+      el('a', { href: '/support.html', target: '_blank', class: 'link-btn', textContent: 'サポート' }),
+    ]),
   ]);
+  if (currentUser?.email && !currentUser.email_verified) {
+    const resend = el('button', { class: 'link-btn', textContent: '確認メールを再送' });
+    resend.addEventListener('click', async () => {
+      resend.disabled = true;
+      try {
+        await api.resendVerification();
+        alert('確認メールを送信しました。');
+      } catch (error) {
+        alert((error as Error).message);
+      } finally {
+        resend.disabled = false;
+      }
+    });
+    logoutSec.insertBefore(resend, logoutSec.children[2]);
+  }
 
   // 👨‍👩‍👧 かぞくと つながる（親子アカウント連携）。個人利用では非表示（データは消さない）。
   const familySec = isPersonal ? null : await familyLinkCard(mode, o);
@@ -2426,6 +2449,7 @@ function renderAuth() {
   const errBox = el('p', { class: 'status err', style: 'display:none' as any });
   const submit = el('button', { type: 'submit', class: 'primary', textContent: 'ログイン' });
   const toggle = el('button', { type: 'button', class: 'link-btn', textContent: 'アカウントを作る' });
+  const forgot = el('button', { type: 'button', class: 'link-btn', textContent: 'パスワードを忘れた' });
   const heading = el('h2', { textContent: 'ログイン' });
 
   const setMode = (m: 'login' | 'register') => {
@@ -2439,6 +2463,19 @@ function renderAuth() {
     errBox.style.display = 'none';
   };
   toggle.addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
+  forgot.addEventListener('click', async () => {
+    const address = prompt('登録したメールアドレスを入力してください', email.value);
+    if (!address) return;
+    forgot.setAttribute('disabled', 'true');
+    try {
+      await api.requestPasswordReset(address);
+      alert('登録済みのメールアドレスであれば、再設定用のメールを送信しました。');
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      forgot.removeAttribute('disabled');
+    }
+  });
   setMode('login');
 
   const form = el('form', { class: 'card auth-card' }, [
@@ -2451,6 +2488,14 @@ function renderAuth() {
     labeled('パスワード', password),
     errBox,
     el('div', { class: 'row between' }, [toggle, submit]),
+    forgot,
+    el('p', { class: 'auth-legal muted' }, [
+      '登録すると ',
+      el('a', { href: '/terms.html', target: '_blank', textContent: '利用規約' }),
+      ' と ',
+      el('a', { href: '/privacy.html', target: '_blank', textContent: 'プライバシーポリシー' }),
+      ' に同意したものとみなされます。',
+    ]),
   ]);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2460,6 +2505,11 @@ function renderAuth() {
         ? await api.login({ email: email.value, password: password.value })
         : await api.register({ email: email.value, display_name: displayName.value, password: password.value });
       currentUser = res.user;
+      if (mode === 'register' && 'verificationSent' in res) {
+        alert(res.verificationSent
+          ? '確認メールを送りました。メール内のリンクを開いて登録を完了してください。'
+          : '登録できました。メール送信設定が完了するまでは、そのまま利用できます。');
+      }
       await boot();
     } catch (err) {
       errBox.textContent = (err as Error).message;
@@ -2469,7 +2519,88 @@ function renderAuth() {
   app().replaceChildren(el('section', { class: 'auth-wrap' }, [form]));
 }
 
+async function renderAuthAction(): Promise<boolean> {
+  if (location.pathname !== '/auth-action') return false;
+  const params = new URLSearchParams(location.search);
+  const action = params.get('action');
+  const token = params.get('token') ?? '';
+  document.documentElement.style.background = document.body.style.background = '';
+
+  const card = el('section', { class: 'auth-wrap' }, [
+    el('div', { class: 'card auth-card' }, [
+      el('h2', { textContent: action === 'reset' ? 'パスワードを再設定' : 'メールアドレスを確認' }),
+      el('p', { class: 'muted', textContent: '確認しています…' }),
+    ]),
+  ]);
+  app().replaceChildren(card);
+  const body = card.querySelector<HTMLElement>('.auth-card')!;
+
+  if (!token || (action !== 'verify' && action !== 'reset')) {
+    body.replaceChildren(
+      el('h2', { textContent: 'リンクが無効です' }),
+      el('p', { class: 'muted', textContent: 'メールに記載されたリンクをもう一度開いてください。' }),
+      el('a', { href: '/', class: 'primary auth-action-link', textContent: 'ログイン画面へ' }),
+    );
+    return true;
+  }
+
+  if (action === 'verify') {
+    try {
+      await api.verifyEmail(token);
+      body.replaceChildren(
+        el('h2', { textContent: '✓ メールアドレスを確認しました' }),
+        el('p', { class: 'muted', textContent: 'マネコを安心してご利用いただけます。' }),
+        el('a', { href: '/', class: 'primary auth-action-link', textContent: 'アプリを開く' }),
+      );
+    } catch (error) {
+      body.replaceChildren(
+        el('h2', { textContent: '確認できませんでした' }),
+        el('p', { class: 'status err', textContent: (error as Error).message }),
+        el('a', { href: '/', class: 'primary auth-action-link', textContent: 'アプリへ戻る' }),
+      );
+    }
+    return true;
+  }
+
+  const password = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '8文字以上' });
+  const confirmPassword = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'もう一度入力' });
+  const errorBox = el('p', { class: 'status err', style: 'display:none' as any });
+  const submit = el('button', { type: 'submit', class: 'primary', textContent: '新しいパスワードを保存' });
+  const form = el('form', {}, [
+    el('h2', { textContent: 'パスワードを再設定' }),
+    labeled('新しいパスワード', password),
+    labeled('確認用パスワード', confirmPassword),
+    errorBox,
+    submit,
+  ]);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorBox.style.display = 'none';
+    if (password.value.length < 8 || password.value !== confirmPassword.value) {
+      errorBox.textContent = password.value.length < 8 ? '8文字以上で入力してください' : 'パスワードが一致しません';
+      errorBox.style.display = 'block';
+      return;
+    }
+    submit.setAttribute('disabled', 'true');
+    try {
+      await api.resetPassword(token, password.value);
+      body.replaceChildren(
+        el('h2', { textContent: '✓ パスワードを変更しました' }),
+        el('p', { class: 'muted', textContent: '新しいパスワードでログインしてください。' }),
+        el('a', { href: '/', class: 'primary auth-action-link', textContent: 'ログイン画面へ' }),
+      );
+    } catch (error) {
+      submit.removeAttribute('disabled');
+      errorBox.textContent = (error as Error).message;
+      errorBox.style.display = 'block';
+    }
+  });
+  body.replaceChildren(form);
+  return true;
+}
+
 async function boot() {
+  if (await renderAuthAction()) return;
   // 旅マップを開いたままリロードした残留エントリを消費（戻る1回が無反応になるのを防ぐ）
   if ((history.state as any)?.jr) history.back();
   const me = await api.me().catch(() => null);

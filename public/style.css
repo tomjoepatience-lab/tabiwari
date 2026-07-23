@@ -267,6 +267,8 @@ button.primary:hover { filter: brightness(1.06); background: var(--accent); }
 /* 認証・グループ */
 .auth-wrap { max-width: 420px; margin: 40px auto; }
 .auth-card h2 { font-size: 20px; }
+.auth-legal { margin: 12px 0 0; font-size: 12px; line-height: 1.6; }
+.auth-action-link { display: inline-block; margin-top: 12px; text-decoration: none; }
 .userbar { padding: 4px 0; }
 .group-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .group-list li { padding: 6px 0; border-bottom: 1px solid #f0f0ee; font-size: 14px; }
@@ -961,6 +963,85 @@ body.theme-adult .card { border: none; border-radius: 20px; box-shadow: 0 4px 14
 @keyframes mfall { 0%{transform:translateY(-80px) rotateY(0);opacity:0} 12%{opacity:1} 100%{transform:translateY(760px) rotateY(900deg);opacity:1} }
 @keyframes mcloud { 0%,100%{transform:translateX(0)} 50%{transform:translateX(22px)} }
 @keyframes mbagbob { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(4deg)} }
+
+/* こどもホーム v3: 生成3Dアートを主役にし、操作だけを高コントラストで重ねる */
+.kids-town-3d {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: url("/assets/kids/maneko-town-3d.webp") center center / cover no-repeat;
+  transform: scale(1.015);
+  transition: filter .35s ease;
+}
+.kids-town-stage-0 { filter: saturate(.78) brightness(.92); }
+.kids-town-stage-1 { filter: saturate(.9) brightness(.96); }
+.kids-town-stage-2 { filter: saturate(1) brightness(1); }
+.kids-town-stage-3 { filter: saturate(1.08) brightness(1.03); }
+.kids-town-stage-4 { filter: saturate(1.16) brightness(1.08) contrast(1.03); }
+.kids-town-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.06) 0 31%, transparent 47%, rgba(66,38,13,.14) 100%);
+}
+.kids-maneko-wrap {
+  position: absolute;
+  left: 50%;
+  bottom: 130px;
+  width: 214px;
+  height: 300px;
+  transform: translateX(-50%);
+  transform-origin: bottom center;
+  cursor: pointer;
+  z-index: 4;
+  filter: drop-shadow(0 12px 12px rgba(64,35,9,.26));
+}
+.kids-maneko-3d {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  transform-origin: center bottom;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.kids-maneko-shadow {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 4px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(50,29,10,.35);
+  filter: blur(6px);
+  transform-origin: center;
+}
+.kids-world-action {
+  position: absolute;
+  top: 586px;
+  z-index: 9;
+  width: 92px;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,.82);
+  border-radius: 22px;
+  background: rgba(255,253,246,.84);
+  box-shadow: 0 8px 24px rgba(67,38,12,.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #60420f;
+  font-size: 11px;
+  font-weight: 800;
+}
+.kids-world-action-icon { font-size: 30px; line-height: 1.05; }
 
 /* モックの提示背景と同じ生成りの上に、402×840 のスマホ画面を置く。
    こどもは「世界そのものが背景」に見えるよう、フチを生成りではなく空→砂のグラデにする。 */

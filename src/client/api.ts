@@ -2,7 +2,7 @@
 
 export type ProjectKind = 'trip' | 'daily';
 export type Trip = { id: number; title: string; kind: ProjectKind; group_id?: number; group_name?: string; start_date: string | null; end_date: string | null; monthly_budget?: number | null; total?: number };
-export type User = { id: number; username: string; email?: string | null };
+export type User = { id: number; username: string; email?: string | null; email_verified?: boolean };
 export type Group = { id: number; name: string; invite_code: string; role: string; members?: number };
 export type Me = { user: User; groups: Group[] };
 export type Member = { id: number; name: string; weight: number };
@@ -128,9 +128,17 @@ export const api = {
     return json<Me>(r);
   },
   register: (body: { email: string; display_name: string; password: string }) =>
-    fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
+    fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User; verificationSent: boolean }>(r)),
   login: (body: { email: string; password: string }) =>
     fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ user: User }>(r)),
+  requestPasswordReset: (email: string) =>
+    fetch('/api/auth/request-password-reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then((r) => json<{ ok: true }>(r)),
+  verifyEmail: (token: string) =>
+    fetch('/api/auth/verify-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then((r) => json<{ ok: true }>(r)),
+  resetPassword: (token: string, password: string) =>
+    fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then((r) => json<{ ok: true }>(r)),
+  resendVerification: () =>
+    fetch('/api/auth/resend-verification', { method: 'POST' }).then((r) => json<{ ok: true; alreadyVerified?: boolean }>(r)),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }),
   deleteAccount: (password: string) =>
     fetch('/api/auth/account', {

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- 既存ユーザーを壊さないため email は移行時点ではNULL可。新規登録APIでは必須。
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
   ON users (lower(email)) WHERE email IS NOT NULL;
 -- 既存DB向け（冪等）: アクセスの見える化（誰がいつ作った/ログインしたか。scripts/who.ts で確認）
@@ -103,6 +104,26 @@ CREATE INDEX IF NOT EXISTS idx_group_invites_group ON group_invites (group_id);
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,           -- ランダムな不透明トークン（cookie に保存）
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- メール認証・パスワード再設定。生のトークンは保存せず SHA-256 のみ保持する。
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('verify_email', 'reset_password')),
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_kind
+  ON auth_tokens (user_id, kind);
+
+CREATE TABLE IF NOT EXISTS support_requests (
+  id         BIGSERIAL PRIMARY KEY,
+  email      TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'open',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

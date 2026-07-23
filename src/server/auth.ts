@@ -3,6 +3,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { pool } from './db';
+import { notifySupportRequest, sendAuthEmail } from './email';
 
 export const auth = Router();
 const COOKIE = 'sid';
@@ -82,6 +83,25 @@ async function createSession(res: Response, userId: number) {
   setSessionCookie(res, token);
 }
 
+function tokenHash(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+async function issueAuthToken(
+  userId: number,
+  kind: 'verify_email' | 'reset_password',
+  lifetime: string,
+): Promise<string> {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query(`DELETE FROM auth_tokens WHERE user_id = $1 AND kind = $2`, [userId, kind]);
+  await pool.query(
+    `INSERT INTO auth_tokens (token_hash, user_id, kind, expires_at)
+     VALUES ($1, $2, $3, now() + $4::interval)`,
+    [tokenHash(token), userId, kind, lifetime],
+  );
+  return token;
+}
+
 // ---- ルート -----------------------------------------------------------
 auth.post('/register', async (req, res) => {
   const { email, display_name, username, password } = req.body ?? {};
@@ -121,7 +141,13 @@ auth.post('/register', async (req, res) => {
     await pool.query(`UPDATE users SET last_login_at = now(), login_count = 1 WHERE id = $1`, [userId]);
     console.log(`[auth] register: ${normalizedEmail} (id ${userId})`);
     await createSession(res, userId);
-    res.status(201).json({ user: rows[0] });
+    const verifyToken = await issueAuthToken(userId, 'verify_email', '24 hours');
+    const verificationSent = await sendAuthEmail(normalizedEmail, displayName, 'verify_email', verifyToken)
+      .catch((error) => {
+        console.error('[email] verification send failed:', error);
+        return false;
+      });
+    res.status(201).json({ user: { ...rows[0], email_verified: false }, verificationSent });
   } catch (e: any) {
     await client.query('ROLLBACK');
     if (e?.code === '23505') return res.status(409).json({ error: 'そのメールアドレスは既に登録されています' });
@@ -166,6 +192,140 @@ auth.post('/logout', async (req, res) => {
   if (token) await pool.query(`DELETE FROM sessions WHERE token = $1`, [token]);
   clearSessionCookie(res);
   res.status(204).end();
+});
+
+auth.post('/request-password-reset', async (req, res) => {
+  const normalizedEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: '有効なメールアドレスを入力してください' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, COALESCE(display_name, username) AS display_name, email
+         FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+      [normalizedEmail],
+    );
+    const user = rows[0];
+    if (user) {
+      const token = await issueAuthToken(user.id, 'reset_password', '30 minutes');
+      await sendAuthEmail(user.email, user.display_name, 'reset_password', token).catch((error) => {
+        console.error('[email] password reset send failed:', error);
+        return false;
+      });
+    }
+    // アカウントの存在を第三者に推測させない。
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '再設定メールを受け付けられませんでした' });
+  }
+});
+
+auth.post('/support', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const website = typeof req.body?.website === 'string' ? req.body.website : '';
+  if (website) return res.json({ ok: true }); // bot向けハニーポット
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: '返信先のメールアドレスを入力してください' });
+  }
+  if (message.length < 10 || message.length > 2000) {
+    return res.status(400).json({ error: 'お問い合わせ内容は10〜2000文字で入力してください' });
+  }
+  try {
+    await pool.query(`INSERT INTO support_requests (email, message) VALUES ($1, $2)`, [email, message]);
+    await notifySupportRequest(email, message).catch((error) => {
+      console.error('[email] support notification failed:', error);
+      return false;
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'お問い合わせを送信できませんでした' });
+  }
+});
+
+auth.post('/verify-email', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  if (!token) return res.status(400).json({ error: '確認リンクが無効です' });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE auth_tokens t
+          SET used_at = now()
+         FROM users u
+        WHERE t.token_hash = $1
+          AND t.kind = 'verify_email'
+          AND t.used_at IS NULL
+          AND t.expires_at > now()
+          AND u.id = t.user_id
+      RETURNING t.user_id`,
+      [tokenHash(token)],
+    );
+    if (!rows[0]) return res.status(400).json({ error: '確認リンクが無効か、期限切れです' });
+    await pool.query(`UPDATE users SET email_verified_at = now() WHERE id = $1`, [rows[0].user_id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'メールアドレスを確認できませんでした' });
+  }
+});
+
+auth.post('/reset-password', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!token) return res.status(400).json({ error: '再設定リンクが無効です' });
+  if (password.length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `UPDATE auth_tokens
+          SET used_at = now()
+        WHERE token_hash = $1
+          AND kind = 'reset_password'
+          AND used_at IS NULL
+          AND expires_at > now()
+      RETURNING user_id`,
+      [tokenHash(token)],
+    );
+    if (!rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: '再設定リンクが無効か、期限切れです' });
+    }
+    await client.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hashPassword(password), rows[0].user_id]);
+    await client.query(`DELETE FROM sessions WHERE user_id = $1`, [rows[0].user_id]);
+    await client.query('COMMIT');
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(error);
+    res.status(500).json({ error: 'パスワードを再設定できませんでした' });
+  } finally {
+    client.release();
+  }
+});
+
+auth.post('/resend-verification', async (req, res) => {
+  const userId = (req as any).userId as number | undefined;
+  if (!userId) return res.status(401).json({ error: 'ログインが必要です' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT email, COALESCE(display_name, username) AS display_name, email_verified_at
+         FROM users WHERE id = $1`,
+      [userId],
+    );
+    const user = rows[0];
+    if (!user?.email) return res.status(400).json({ error: 'メールアドレスが登録されていません' });
+    if (user.email_verified_at) return res.json({ ok: true, alreadyVerified: true });
+    const token = await issueAuthToken(userId, 'verify_email', '24 hours');
+    const sent = await sendAuthEmail(user.email, user.display_name, 'verify_email', token);
+    if (!sent) return res.status(503).json({ error: 'メール送信の設定が完了していません' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '確認メールを送信できませんでした' });
+  }
 });
 
 // App Store要件: アプリ内でアカウントと関連データを完全削除できる。
@@ -238,7 +398,9 @@ auth.get('/me', async (req, res) => {
   if (!userId) return res.status(401).json({ error: '未ログイン' });
   try {
     const userQ = await pool.query(
-      `SELECT id, email, COALESCE(display_name, username) AS username FROM users WHERE id = $1`,
+      `SELECT id, email, COALESCE(display_name, username) AS username,
+              (email_verified_at IS NOT NULL) AS email_verified
+         FROM users WHERE id = $1`,
       [userId]
     );
     if (!userQ.rows[0]) return res.status(401).json({ error: '未ログイン' });

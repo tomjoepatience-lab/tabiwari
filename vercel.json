@@ -3,6 +3,7 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/invite/(.*)", "destination": "/api/index" },
+    { "source": "/auth-action", "destination": "/api/index" },
     { "source": "/.well-known/apple-app-site-association", "destination": "/api/index" }
   ],
   "functions": {

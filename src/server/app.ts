@@ -62,6 +62,9 @@ app.use(express.static(publicDir));
 app.get('/invite/:token', (_req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
+app.get('/auth-action', (_req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
 // ※ Vercel では public/ はプラットフォームが自動で静的配信する想定のため、この行は主に
 //   ローカル開発(npm run dev)とRenderでの配信を担う。Vercel環境でも到達すれば動作するが、
 //   通常は静的アセットへのリクエストが関数まで届く前にVercel側で処理される。
