@@ -701,6 +701,18 @@ async function kidsFamilyPhoto(o: Overview): Promise<HTMLElement[]> {
     el('summary', { textContent: '家族の連携・設定' }),
     el('div', { class: 'kids-photo-manage-body' }, original.slice(1)),
   ]);
+  const replayTutorial = el('button', { type: 'button', class: 'kids-photo-history-row' }, [
+    el('span', { textContent: '🐱' }),
+    el('strong', { textContent: 'チュートリアルをもう一度見る' }),
+    el('b', { textContent: '›' }),
+  ]);
+  replayTutorial.addEventListener('click', () => {
+    const url = new URL(location.href);
+    url.searchParams.set('tutorial', '1');
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    homeTab = 'home';
+    void renderHome();
+  });
   const body = [
     el('h1', { class: 'kids-photo-title', textContent: '家族' }),
     connection,
@@ -711,6 +723,7 @@ async function kidsFamilyPhoto(o: Overview): Promise<HTMLElement[]> {
       el('strong', { textContent: '家族との履歴' }),
       el('b', { textContent: '›' }),
     ]),
+    replayTutorial,
     manage,
   ];
   return kidsPhotoShell({ active: 'menu', family: true, scene: 'family', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
