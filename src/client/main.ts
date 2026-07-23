@@ -714,14 +714,20 @@ async function kidsFamilyPhoto(o: Overview): Promise<HTMLElement[]> {
 async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
   const sections = await settingsPanel(o, 'kids');
   const details = el('details', { class: 'kids-photo-settings-details' }, [
-    el('summary', { textContent: '設定内容を開く' }),
+    el('summary', {}, [
+      el('span', { class: 'kids-settings-summary-icon', textContent: '⚙' }),
+      el('span', { class: 'kids-settings-summary-copy' }, [
+        el('strong', { textContent: '詳細設定' }),
+        el('small', { textContent: '家計簿・利用タイプ・アカウント' }),
+      ]),
+      el('b', { textContent: '⌄' }),
+    ]),
     el('div', { class: 'kids-photo-settings-body' }, sections),
   ]);
   const menuItems: Array<[string, string]> = [
     ['♙', 'プロフィール'],
     ['♧', '通知'],
     ['▣', '表示'],
-    ['♧', '家族と連携'],
     ['♢', 'アカウント'],
   ];
   const menu = el('div', { class: 'kids-photo-settings-menu' }, menuItems.map(([icon, label]) => {
@@ -751,53 +757,18 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
   return kidsPhotoShell({ active: 'menu', family: false, scene: 'settings', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
 }
 
-// 初回だけ: こども / おとな のモード選択（かぞく利用のときは利用タイプ選択のあとに出す）
-function renderModePicker(pendingUsageType?: UsageType) {
-  // theme クラスの無い画面: renderHome が敷いた html/body のステージ背景を消して既定(--bg)に戻す。
-  document.documentElement.style.background = document.body.style.background = '';
-  const pick = async (mode: AppMode) => {
-    try {
-      await api.saveSettings(pendingUsageType ? { mode, usage_type: pendingUsageType } : { mode });
-      overviewCache = null;
-      homeTab = 'home';
-      await renderHome();
-    } catch (e) { alert((e as Error).message); }
-  };
-  const card = (mode: AppMode, emoji: string, title: string, desc: string) => {
-    const b = el('button', { class: 'mode-card mode-' + mode }, [
-      el('span', { class: 'mode-emoji', textContent: emoji }),
-      el('strong', { textContent: title }),
-      el('span', { class: 'mode-desc', textContent: desc }),
-    ]);
-    b.addEventListener('click', () => void pick(mode));
-    return b;
-  };
-  app().replaceChildren(el('section', { class: 'card mode-pick' }, [
-    el('h2', { textContent: '🐱 どっちのマネコにする?' }),
-    el('p', { class: 'muted', textContent: 'あとで「せってい / メニュー」からいつでも切りかえられます。' }),
-    el('div', { class: 'mode-grid' }, [
-      card('kids', '🏘️', 'マネコタウン', '貯金するとマネコと街が育つ、楽しいお金管理モード'),
-      card('adult', '💼', '大人モード', '予算・支出・レポートをシンプルに管理'),
-    ]),
-  ]));
-}
-
 // 利用タイプ（家族/個人）選択。usage_type が未選択のユーザーは必ずここを通る。
-// existing: 既に settings 行がある（＝以前から使っている）ユーザーは既存の mode を壊さず usage_type だけ保存する。
-// 真の新規ユーザー（existing=null）だけ、かぞく選択後にモード選択（こども/おとな）へ進む。
+// 新規ユーザーは家族・個人どちらもマネコタウンUIで開始する。
+// 既存ユーザーは現在の mode を維持し、利用タイプだけを変更する。
 function renderUsagePicker(existing: UserSettings | null) {
   document.documentElement.style.background = document.body.style.background = '';
   const pick = async (usage: UsageType) => {
     try {
       if (!existing) {
-        if (usage === 'personal') {
-          await api.saveSettings({ usage_type: 'personal', mode: 'adult' });
-          overviewCache = null;
-          homeTab = 'home';
-          await renderHome();
-        } else {
-          renderModePicker('family');
-        }
+        await api.saveSettings({ usage_type: usage, mode: 'kids' });
+        overviewCache = null;
+        homeTab = 'home';
+        await renderHome();
       } else {
         await api.saveSettings({ usage_type: usage });
         overviewCache = null;
@@ -1314,27 +1285,24 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const s = o.settings!;
   const kids = mode === 'kids';
 
-  // モード切替
-  const modeBtn = el('button', { class: 'primary', textContent: kids ? '💼 大人モードに切り替え' : '🏘️ マネコタウンに切り替え' });
-  modeBtn.addEventListener('click', async () => {
-    await api.saveSettings({ mode: kids ? 'adult' : 'kids' });
-    overviewCache = null;
-    homeTab = 'home';
-    await renderHome();
-  });
-  // 連携中の子は おとなモードに切り替えできない（サーバーも 403）。ボタンを出さず案内だけ。
-  const modeSwitch: HTMLElement = kids && o.linkedAsChild
-    ? el('p', { class: 'muted', textContent: '家族と連携している間は、大人モードへ切り替えられません。' })
-    : modeBtn;
   const modeSec = el('section', { class: 'card' }, [
-    el('h2', { textContent: kids ? '⚙️ 設定' : '⚙️ 設定' }),
-    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ ${kids ? 'マネコタウン' : '大人'}モード` }),
-    modeSwitch,
+    el('h2', { textContent: kids ? '👤 プロフィール' : '⚙️ 設定' }),
+    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ ${kids ? 'マネコタウン' : '大人モード'}` }),
   ]);
   if (kids) {
     const reportBtn = el('button', { class: 'link-btn', textContent: '📊 支出レポートを見る' });
     reportBtn.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
     modeSec.append(reportBtn);
+  } else {
+    // 既存の大人モード利用者には、マネコタウンへの一方向の移行だけ残す。
+    const townBtn = el('button', { class: 'primary', textContent: '🏘️ マネコタウンに切り替え' });
+    townBtn.addEventListener('click', async () => {
+      await api.saveSettings({ mode: 'kids' });
+      overviewCache = null;
+      homeTab = 'home';
+      await renderHome();
+    });
+    modeSec.append(townBtn);
   }
 
   // 利用タイプ（家族⇔個人）切替。personal→family に切り替えても連携等のデータは消さない（非表示になるだけ）。
@@ -1364,19 +1332,28 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     const num = (i: HTMLInputElement) => (i.value.trim() === '' ? null : Math.round(Number(i.value)));
     try {
       await api.saveSettings(kids
-        ? { allowance: num(allowance), balance_start: num(startBal) ?? 0 }
+        ? (isPersonal
+          ? { balance_start: num(startBal) ?? 0 }
+          : { allowance: num(allowance), balance_start: num(startBal) ?? 0 })
         : { monthly_budget: num(budget), monthly_income: num(income) });
       overviewCache = null;
       await renderHome();
     } catch (e) { alert((e as Error).message); }
   });
+  const kidsMoneyFields = isPersonal
+    ? [labeled('お財布のスタート額', startBal), saveBtn]
+    : [labeled('月のお小遣い', allowance), labeled('お財布のスタート額', startBal), saveBtn];
   const moneySec = el('section', { class: 'card' }, [
-    el('h2', { textContent: kids ? '💰 おこづかいの設定' : '💰 予算と収入' }),
+    el('h2', { textContent: kids
+      ? (isPersonal ? '💰 お財布の設定' : '💰 お小遣いの設定')
+      : '💰 予算と収入' }),
     el('div', { class: 'row' }, kids
-      ? [labeled('月のおこづかい', allowance), labeled('おさいふのスタート額', startBal), saveBtn]
+      ? kidsMoneyFields
       : [labeled('月の予算', budget), labeled('月の収入（手取り）', income), saveBtn]),
     el('p', { class: 'muted', textContent: kids
-      ? 'おこづかいをもらったら「貯金」タブからお財布に追加できます。'
+      ? (isPersonal
+        ? '現在のお財布残高の基準になる金額です。'
+        : 'お小遣いをもらったら「貯金」タブからお財布に追加できます。')
       : '予算を設定するとホームに「今月あと使える」が表示されます。' }),
   ]);
 
