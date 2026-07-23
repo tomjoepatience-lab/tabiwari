@@ -1952,6 +1952,7 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   align-items: center;
   justify-content: center;
   color: #fff;
+  transition: opacity .24s ease,transform .24s ease;
 }
 .journey-v3-goal button {
   width: 40px;
@@ -2034,6 +2035,7 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   z-index: 12;
   padding: 10px 13px;
   border-radius: 18px;
+  transition: opacity .24s ease,transform .24s ease;
 }
 .journey-v3-footer div { display: flex; justify-content: space-between; align-items: center; }
 .journey-v3-footer strong { font-size: 13px; }
@@ -2048,6 +2050,16 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .journey-v3-footer b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#f4bc42,#fff09a); }
 .journey-v3-footer p { margin: 0; font-size: 9.5px; font-weight: 700; color: rgba(255,255,255,.84); text-align: center; }
+.journey-v3-canvas.journey-v3-ui-hidden .journey-v3-goal {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%,-14px);
+}
+.journey-v3-canvas.journey-v3-ui-hidden .journey-v3-footer {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(18px);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .kids-maneko-v3,
@@ -2195,7 +2207,6 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   -webkit-backdrop-filter: blur(14px) saturate(1.08);
 }
 .kids-photo-page > .kids-nav-v3 {
-  bottom: max(0px, env(safe-area-inset-bottom));
   z-index: 1200;
   background: rgba(255,250,239,.97);
   box-shadow: 0 10px 28px rgba(45,30,15,.3);
@@ -2333,6 +2344,66 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
 }
 .kids-photo-info-row:last-child { border-bottom: 0; }
 .kids-photo-info-row strong { font-size: 12px; }
+.kids-photo-destinations-row {
+  padding: 10px 11px 12px;
+  background: rgba(255,250,239,.35);
+}
+.kids-destination-head {
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  color: #674522;
+}
+.kids-destination-head strong { font-size: 12px; }
+.kids-destination-summary {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #fff0ce;
+  color: #9b661d;
+  font-size: 8px;
+  font-weight: 900;
+}
+.kids-destination-summary.empty { background: #f8e1dd; color: #a65349; }
+.kids-destination-options {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 6px;
+}
+.kids-destination-option {
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid #ead7b5;
+  border-radius: 11px;
+  background: #fffaf0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #704b27;
+  font-size: 9px;
+  font-weight: 800;
+}
+.kids-destination-option:has(input:checked) {
+  border-color: #efa42d;
+  background: #fff0cf;
+  box-shadow: inset 0 0 0 1px rgba(239,164,45,.2);
+}
+.kids-destination-option input {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: #eb961c;
+}
+.kids-destination-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .kids-photo-row-value,
 .kids-photo-native-input {
   min-width: 0;

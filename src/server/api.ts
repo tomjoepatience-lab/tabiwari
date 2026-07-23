@@ -1168,7 +1168,7 @@ api.get('/events', async (req, res) => {
 // 品名＋金額だけで記録できるようにする（記録までの道のりを最短に）。
 api.post('/expenses/quick', async (req, res) => {
   const userId = uid(req);
-  const { group_id, store_name, category, purchased_on, items, lat, lng, place_name, photos } = req.body ?? {};
+  const { group_id, group_ids, store_name, category, purchased_on, items, lat, lng, place_name, photos } = req.body ?? {};
   const storeStr = typeof store_name === 'string' && store_name.trim() ? store_name.trim() : null;
   const list: { name: string; price: number; genre: string }[] = Array.isArray(items)
     ? items
@@ -1205,54 +1205,67 @@ api.post('/expenses/quick', async (req, res) => {
       await client.query(`INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, [g.rows[0].id, userId]);
       gids = [g.rows[0].id];
     }
+    const requestedGroups = Array.isArray(group_ids)
+      ? [...new Set(group_ids.map(Number).filter(Number.isInteger))]
+      : [];
     const requestedGroup = Number(group_id);
-    if (Number.isInteger(requestedGroup)) {
+    let targetGroupIds: number[];
+    if (requestedGroups.length) {
+      if (requestedGroups.some((id) => !gids.includes(id))) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: '選択した家計簿スペースの一部に参加していません' });
+      }
+      targetGroupIds = requestedGroups;
+    } else if (Number.isInteger(requestedGroup)) {
       if (!gids.includes(requestedGroup)) {
         await client.query('ROLLBACK');
         return res.status(403).json({ error: 'この家計簿スペースには参加していません' });
       }
-      gids = [requestedGroup];
+      targetGroupIds = [requestedGroup];
     } else {
       const active = (await client.query(`SELECT active_group_id FROM user_settings WHERE user_id = $1`, [userId])).rows[0]?.active_group_id;
-      if (active && gids.includes(active)) gids = [active];
-      else gids = [gids[0]];
+      targetGroupIds = [active && gids.includes(active) ? active : gids[0]];
     }
-    // 2) 日常プロジェクト（無ければ自動作成）
-    let trip = (await client.query(
-      `SELECT id FROM trips WHERE group_id = ANY($1::int[]) AND kind = 'daily' ORDER BY id LIMIT 1`, [gids]
-    )).rows[0];
-    if (!trip) {
-      trip = (await client.query(
-        `INSERT INTO trips (title, kind, group_id) VALUES ($1, 'daily', $2) RETURNING id`, [`${uname}の家計簿`, gids[0]]
+    // 2〜4) 選択した各家計簿の日常プロジェクトへ同じ記録を保存する。
+    // ごほうび計算はループ外で一度だけ行うため、複数保存でも二重付与されない。
+    const savedReceipts: { receipt_id: number; trip_id: number; group_id: number }[] = [];
+    for (const targetGroupId of targetGroupIds) {
+      let trip = (await client.query(
+        `SELECT id FROM trips WHERE group_id = $1 AND kind = 'daily' ORDER BY id LIMIT 1`, [targetGroupId]
       )).rows[0];
-    }
-    // 3) 自分メンバー（無ければ自動作成）
-    let member = (await client.query(`SELECT id FROM members WHERE trip_id = $1 AND name = $2 LIMIT 1`, [trip.id, uname])).rows[0]
-      ?? (await client.query(`SELECT id FROM members WHERE trip_id = $1 ORDER BY id LIMIT 1`, [trip.id])).rows[0];
-    if (!member) {
-      member = (await client.query(`INSERT INTO members (trip_id, name) VALUES ($1, $2) RETURNING id`, [trip.id, uname])).rows[0];
-    }
-    // 4) レシート＋明細（ジャンル付き）＋負担（全部自分）＋思い出写真
-    const r = await client.query(
-      `INSERT INTO receipts (trip_id, store_name, purchased_on, paid_by, category, lat, lng, place_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [trip.id, storeStr, day, member.id,
-       typeof category === 'string' && category ? category : null,
-       latNum, lngNum,
-       typeof place_name === 'string' && place_name.trim() ? place_name.trim() : null]
-    );
-    for (const it of list) {
-      const item = await client.query(
-        `INSERT INTO items (receipt_id, name, price, quantity, genre) VALUES ($1, $2, $3, 1, $4) RETURNING id`,
-        [r.rows[0].id, it.name, it.price, it.genre]
+      if (!trip) {
+        trip = (await client.query(
+          `INSERT INTO trips (title, kind, group_id) VALUES ($1, 'daily', $2) RETURNING id`,
+          [`${uname}の家計簿`, targetGroupId]
+        )).rows[0];
+      }
+      let member = (await client.query(`SELECT id FROM members WHERE trip_id = $1 AND name = $2 LIMIT 1`, [trip.id, uname])).rows[0]
+        ?? (await client.query(`SELECT id FROM members WHERE trip_id = $1 ORDER BY id LIMIT 1`, [trip.id])).rows[0];
+      if (!member) {
+        member = (await client.query(`INSERT INTO members (trip_id, name) VALUES ($1, $2) RETURNING id`, [trip.id, uname])).rows[0];
+      }
+      const receipt = await client.query(
+        `INSERT INTO receipts (trip_id, store_name, purchased_on, paid_by, category, lat, lng, place_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [trip.id, storeStr, day, member.id,
+         typeof category === 'string' && category ? category : null,
+         latNum, lngNum,
+         typeof place_name === 'string' && place_name.trim() ? place_name.trim() : null]
       );
-      await client.query(`INSERT INTO item_shares (item_id, member_id) VALUES ($1, $2)`, [item.rows[0].id, member.id]);
-    }
-    for (const buf of photoBufs) {
-      await client.query(
-        `INSERT INTO trip_photos (trip_id, receipt_id, photo, taken_on) VALUES ($1, $2, $3, $4)`,
-        [trip.id, r.rows[0].id, buf, day]
-      );
+      for (const it of list) {
+        const item = await client.query(
+          `INSERT INTO items (receipt_id, name, price, quantity, genre) VALUES ($1, $2, $3, 1, $4) RETURNING id`,
+          [receipt.rows[0].id, it.name, it.price, it.genre]
+        );
+        await client.query(`INSERT INTO item_shares (item_id, member_id) VALUES ($1, $2)`, [item.rows[0].id, member.id]);
+      }
+      for (const buf of photoBufs) {
+        await client.query(
+          `INSERT INTO trip_photos (trip_id, receipt_id, photo, taken_on) VALUES ($1, $2, $3, $4)`,
+          [trip.id, receipt.rows[0].id, buf, day]
+        );
+      }
+      savedReceipts.push({ receipt_id: receipt.rows[0].id, trip_id: trip.id, group_id: targetGroupId });
     }
 
     // ごほうび: 記録+10XP、その日はじめての記録=チャレンジクリアで+5コイン+5XP、
@@ -1278,7 +1291,12 @@ api.post('/expenses/quick', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.status(201).json({ receipt_id: r.rows[0].id, trip_id: trip.id, reward });
+    res.status(201).json({
+      receipt_id: savedReceipts[0].receipt_id,
+      trip_id: savedReceipts[0].trip_id,
+      receipts: savedReceipts,
+      reward,
+    });
   } catch (e) {
     await client.query('ROLLBACK');
     serverError(res, e);

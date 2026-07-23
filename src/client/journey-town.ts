@@ -141,6 +141,16 @@ export function journeyView(overview: Overview, goalId?: number): HTMLElement {
     overlay.querySelectorAll<HTMLElement>('[data-step]').forEach((button) => {
       button.addEventListener('click', () => changeGoal(Number(button.dataset.step)));
     });
+    const canvas = overlay.querySelector<HTMLElement>('.journey-v3-canvas');
+    canvas?.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement;
+      // 戻る・目標切替・進捗カードそのものを操作したときは表示状態を変えない。
+      if (target.closest('.journey-v3-header button,.journey-v3-goal,.journey-v3-footer')) return;
+      const hidden = canvas.classList.toggle('journey-v3-ui-hidden');
+      canvas.setAttribute('aria-label', hidden
+        ? '背景をタップすると目標と進捗を表示します'
+        : '背景をタップすると目標と進捗を隠します');
+    });
   };
 
   render();

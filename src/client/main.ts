@@ -357,14 +357,49 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
     receiptStatus.classList.add('show');
   });
 
-  const groupSelect = el('select', { class: 'kids-photo-native-input' },
-    myGroups.map((group) => el('option', { value: String(group.id), textContent: group.name })));
-  if (activeGroupId) groupSelect.value = String(activeGroupId);
+  const defaultGroupId = activeGroupId && myGroups.some((group) => group.id === activeGroupId)
+    ? activeGroupId
+    : myGroups[0]?.id ?? null;
+  const destinationSummary = el('small', { class: 'kids-destination-summary' });
+  const destinationInputs = myGroups.map((group) => {
+    const input = el('input', {
+      type: 'checkbox',
+      value: String(group.id),
+      checked: group.id === defaultGroupId,
+    }) as HTMLInputElement;
+    return {
+      input,
+      label: el('label', { class: 'kids-destination-option' }, [
+        input,
+        el('span', { textContent: group.name }),
+      ]),
+    };
+  });
+  const selectedGroupIds = () => destinationInputs
+    .filter(({ input }) => input.checked)
+    .map(({ input }) => Number(input.value));
+  const updateDestinationSummary = () => {
+    const count = selectedGroupIds().length;
+    destinationSummary.textContent = count ? `${count}件選択` : '未選択';
+    destinationSummary.classList.toggle('empty', count === 0);
+  };
+  destinationInputs.forEach(({ input }) => input.addEventListener('change', updateDestinationSummary));
+  updateDestinationSummary();
+  const destinationsRow = el('div', { class: 'kids-photo-destinations-row' }, [
+    el('div', { class: 'kids-destination-head' }, [
+      kidsLineIcon('group', 'kids-photo-row-icon'),
+      el('strong', { textContent: '保存先' }),
+      destinationSummary,
+    ]),
+    el('div', { class: 'kids-destination-options' }, destinationInputs.map(({ label }) => label)),
+  ]);
 
   const save = el('button', { type: 'button', class: 'kids-photo-primary', textContent: '保存する' });
   save.addEventListener('click', async () => {
     const total = Math.round(Number(amount.value));
     if (!Number.isFinite(total) || total <= 0) return alert('金額を入力してください');
+    const groupIds = selectedGroupIds();
+    if (myGroups.length && !groupIds.length) return alert('保存先を1つ以上選んでください');
     save.disabled = true;
     const scannedTotal = ocrItems.reduce((sum, item) => sum + item.price, 0);
     const items = ocrItems.length && scannedTotal === total
@@ -375,7 +410,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
       : [{ name: storeName || category, price: total, genre: genreSelect.value }];
     try {
       const result = await api.quickExpense({
-        group_id: Number(groupSelect.value) || activeGroupId || undefined,
+        group_ids: groupIds.length ? groupIds : undefined,
         store_name: storeName || location.name || undefined,
         category,
         purchased_on: date.value || todayIso(),
@@ -384,7 +419,11 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
         lng: location.lng,
         place_name: location.name,
       });
-      pendingCelebrate = { kind: 'generic', name: items[0].name, reward: result.reward };
+      pendingCelebrate = {
+        kind: 'generic',
+        name: `${items[0].name}${result.receipts.length > 1 ? `（${result.receipts.length}か所）` : ''}`,
+        reward: result.reward,
+      };
       recentCache = null;
       overviewCache = null;
       homeTab = 'home';
@@ -417,12 +456,7 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
         el('span', { class: 'kids-photo-chevron', textContent: '›' }),
       ]),
       placeRow,
-      ...(myGroups.length > 1 ? [el('label', { class: 'kids-photo-info-row' }, [
-        kidsLineIcon('group', 'kids-photo-row-icon'),
-        el('strong', { textContent: '保存先' }),
-        groupSelect,
-        el('span', { class: 'kids-photo-chevron', textContent: '›' }),
-      ])] : []),
+      ...(myGroups.length > 1 ? [destinationsRow] : []),
     ]),
     save,
   ];

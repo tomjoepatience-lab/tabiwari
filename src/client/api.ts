@@ -190,9 +190,14 @@ export const api = {
     store_name?: string; category?: string; purchased_on: string;
     items: { name: string; price: number; genre?: string }[];
     lat?: number | null; lng?: number | null; place_name?: string | null;
-    photos?: string[]; group_id?: number;
+    photos?: string[]; group_id?: number; group_ids?: number[];
   }) =>
-    fetch('/api/expenses/quick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{ receipt_id: number; trip_id: number; reward: QuickReward }>(r)),
+    fetch('/api/expenses/quick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => json<{
+      receipt_id: number;
+      trip_id: number;
+      receipts: { receipt_id: number; trip_id: number; group_id: number }[];
+      reward: QuickReward;
+    }>(r)),
   setItemGenre: (id: number, genre: string) =>
     fetch(`/api/items/${id}/genre`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ genre }) }).then((r) => json<{ id: number; genre: string }>(r)),
   // モード・ゲーミフィケーション
