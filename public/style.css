@@ -1536,31 +1536,224 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
    🐾 初回チュートリアル（利用タイプ選択の直後・1回だけ）
    ====================================================================== */
 .tut-overlay {
-  position: absolute; inset: 0; z-index: 3500; /* .cm-overlay(3000) より上・最前面 */
-  background: rgba(46,42,36,.55);
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px 18px;
+  position: absolute;
+  inset: 0;
+  z-index: 5000;
+  overflow: hidden;
+  pointer-events: none;
+  font-family: "M PLUS Rounded 1c", sans-serif;
+}
+.tut-spotlight {
+  position: absolute;
+  z-index: 1;
+  border: 3px solid rgba(255,210,91,.98);
+  border-radius: 22px;
+  background: rgba(255,255,255,.05);
+  box-shadow:
+    0 0 0 9999px rgba(25,20,16,.68),
+    0 0 0 6px rgba(255,218,112,.22),
+    0 10px 30px rgba(25,20,16,.32);
+  transition: left .28s ease, top .28s ease, width .28s ease, height .28s ease;
+  pointer-events: none;
+}
+.tut-spotlight::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border: 2px solid rgba(255,232,166,.7);
+  border-radius: 28px;
+  animation: tut-pulse 1.7s ease-in-out infinite;
 }
 .tut-card {
-  position: relative; width: 100%; max-width: 320px;
-  background: #FFFDF6; border-radius: 20px;
-  box-shadow: 0 18px 40px rgba(46,42,36,.35);
-  padding: 22px 20px 18px;
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  text-align: center;
-  animation: cm-pop .18s ease-out;
+  position: absolute;
+  left: 18px;
+  z-index: 2;
+  width: calc(100% - 36px);
+  max-height: 470px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,.9);
+  border-radius: 24px;
+  background: rgba(255,252,244,.97);
+  box-shadow: 0 20px 50px rgba(29,19,10,.4);
+  padding: 17px 18px 14px;
+  color: #4d321d;
+  text-align: left;
+  pointer-events: auto;
+  animation: tut-card-in .25s cubic-bezier(.2,.8,.2,1);
+  scrollbar-width: none;
 }
-.tut-skip { position: absolute; top: 10px; right: 12px; font-size: 12px; padding: 4px 8px; }
-.tut-dots { display: flex; gap: 6px; margin-bottom: 4px; }
-.tut-dot { width: 7px; height: 7px; border-radius: 999px; background: #E4DCC8; }
-.tut-dot.active { background: #E8B62B; }
-.tut-emoji { font-size: 42px; line-height: 1; margin-top: 6px; }
-.tut-title { font-size: 16px; font-weight: 800; color: #2E2A24; margin: 2px 0 0; }
-.tut-text { font-size: 13px; color: #5C544A; line-height: 1.6; margin: 0; }
-.tut-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; width: 100%; }
-.tut-prev { background: none; border: none; color: #8C8375; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.tut-card::-webkit-scrollbar { display: none; }
+.tut-skip {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 2;
+  border: 0;
+  background: transparent;
+  color: #8a7764;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.tut-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 16px;
+  padding-right: 52px;
+  color: #a28d75;
+  font-size: 9px;
+  font-weight: 800;
+}
+.tut-dots { display: flex; gap: 5px; }
+.tut-dot {
+  width: 18px;
+  height: 4px;
+  border-radius: 999px;
+  background: #e5ddce;
+  transition: background .2s, width .2s;
+}
+.tut-dot.active { width: 28px; background: linear-gradient(90deg,#eea625,#f4c852); }
+.tut-guide {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  margin-top: 8px;
+}
+.tut-guide img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  object-position: center top;
+  filter: drop-shadow(0 5px 6px rgba(93,53,16,.18));
+}
+.tut-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: #c98218;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.tut-title {
+  margin: 0;
+  color: #4d321d;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+.tut-text {
+  margin: 7px 0 12px;
+  color: #695643;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.65;
+}
+.tut-next {
+  width: 100%;
+  min-height: 45px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(135deg,#f5ad27,#e88a16);
+  box-shadow: 0 7px 15px rgba(196,111,11,.24), inset 0 1px rgba(255,255,255,.45);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.tut-next:disabled { opacity: .58; cursor: wait; }
+.tut-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 22px;
+  margin-top: 2px;
+}
+.tut-prev {
+  border: none;
+  background: none;
+  color: #8C8375;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
 .tut-prev:disabled { visibility: hidden; }
-.tut-next { flex: 1; max-width: 160px; }
+.tut-input-label,
+.tut-field {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 8px;
+  color: #6e5439;
+  font-size: 10px;
+  font-weight: 900;
+}
+.tut-field { grid-template-columns: 56px 1fr; }
+.tut-money-input,
+.tut-goal-name {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1.5px solid #e7d7bc;
+  border-radius: 12px;
+  outline: 0;
+  background: #fff;
+  padding: 0 12px;
+  color: #4d321d;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+}
+.tut-money-input:focus,
+.tut-goal-name:focus {
+  border-color: #efa326;
+  box-shadow: 0 0 0 3px rgba(239,163,38,.14);
+}
+.tut-quicks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.tut-quick {
+  min-height: 32px;
+  border: 1px solid #e8d8bd;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #7b6043;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.tut-quick.active {
+  border-color: #ef9e20;
+  background: #fff0cc;
+  color: #b56509;
+}
+.tut-status {
+  min-height: 16px;
+  margin: 5px 0 0;
+  color: #a56a1d;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-align: center;
+}
+@keyframes tut-pulse {
+  0%, 100% { opacity: .3; transform: scale(.98); }
+  50% { opacity: .9; transform: scale(1.025); }
+}
+@keyframes tut-card-in {
+  from { opacity: 0; transform: translateY(12px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
 /* ======================================================================
    Maneko Town v4 — savings-driven town, journey and four-tab experience
    ====================================================================== */
@@ -1568,6 +1761,11 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   position: relative;
   width: 402px;
   height: 840px;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: block;
+  gap: 0;
   overflow: hidden;
   isolation: isolate;
   color: #3d2f22;

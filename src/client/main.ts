@@ -867,54 +867,236 @@ function renderUsagePicker() {
   ]));
 }
 
-// 初回チュートリアル（利用タイプ選択の直後・1回だけ）。前へ/次へ/スキップのコーチマークカード。
-const FAMILY_TUTORIAL: { emoji: string; title: string; text: string }[] = [
-  { emoji: '🐱', title: 'ホーム', text: '買ったものにマネコが反応するよ。がんばりをそばで見てくれる相棒だよ。' },
-  { emoji: '🏘️', title: '街を育てる', text: '貯金するとマネコが道を進み、街と服装が変化します。' },
-  { emoji: '✏️', title: '支出を記録', text: '「記録」タブから、買ったものをすぐに記録できます。' },
-  { emoji: '👨‍👩‍👧', title: '家族とつながる', text: '「家族」タブの連携コードで、家族のアカウントとつながれます。' },
-  { emoji: '🧹', title: 'おこづかい・お手伝い', text: 'おこづかいや、お手伝いポイントを家族とやり取りできます。' },
-];
-const PERSONAL_TUTORIAL: { emoji: string; title: string; text: string }[] = [
-  { emoji: '🐱', title: 'ホーム', text: 'マネコが買い物に反応します。使いすぎに気づいたら、そっと教えてくれます。' },
-  { emoji: '🧾', title: '記録', text: 'レシートを読み取って自動入力できます（1日5回まで）。' },
-  { emoji: '📊', title: 'レポート', text: 'カレンダーや地図で、いつ・どこで使ったか振り返れます。' },
-  { emoji: '🌱', title: '貯金', text: '目標を作って、貯金の進み具合を見える化できます。' },
-];
-function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement) {
+// 初回チュートリアル。画面上の対象だけを照らし、予算と最初の貯金目標は
+// コーチカード内から実際に保存できる。?tutorial=1 で完了済みの人も再生可能。
+type TutorialStep = {
+  selector: string;
+  eyebrow: string;
+  title: string;
+  text: string;
+  kind: 'welcome' | 'budget' | 'goal' | 'record' | 'finish';
+};
+
+function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement, overview: Overview) {
   const canvas = anchorPanel.querySelector<HTMLElement>('.pc-canvas') ?? anchorPanel;
-  const steps = usage === 'family' ? FAMILY_TUTORIAL : PERSONAL_TUTORIAL;
+  const existingGoal = featuredGoal(overview);
+  const steps: TutorialStep[] = [
+    {
+      selector: '#k-cat',
+      eyebrow: 'はじめまして',
+      title: 'ぼくがマネコ！',
+      text: 'お金の記録と貯金を、街を育てながら一緒に続けよう。まずは2つだけ設定するにゃ。',
+      kind: 'welcome',
+    },
+    {
+      selector: '.kids-month-chip',
+      eyebrow: '初期設定 1/2',
+      title: '今月の予算を決めよう',
+      text: '使える金額がホームですぐ分かるようになるよ。あとから設定で変更できます。',
+      kind: 'budget',
+    },
+    {
+      selector: '#k-goal',
+      eyebrow: '初期設定 2/2',
+      title: existingGoal ? '貯金目標は設定済み！' : '最初の貯金目標を作ろう',
+      text: existingGoal
+        ? `「${existingGoal.name}」までの道のりを、ここからいつでも確認できるよ。`
+        : '欲しいものや、やってみたいことを1つ決めよう。貯金するとマネコが道を進みます。',
+      kind: 'goal',
+    },
+    {
+      selector: '[data-nav="add"]',
+      eyebrow: '使い方',
+      title: '買ったら「記録」',
+      text: '金額を入力するか、レシートを撮るだけ。費目は自動判定したあと自分で直せます。',
+      kind: 'record',
+    },
+    {
+      selector: '[data-nav="menu"]',
+      eyebrow: '準備完了',
+      title: usage === 'family' ? '家族とも一緒に使えるよ' : '自分に合う設定へ',
+      text: usage === 'family'
+        ? 'ここから招待リンクを送り、おこづかいやお手伝いを家族と共有できます。'
+        : '通知・表示・プロフィールは、ここからいつでも変更できます。',
+      kind: 'finish',
+    },
+  ];
   let i = 0;
   const overlay = el('div', { class: 'tut-overlay' });
+  const spotlight = el('div', { class: 'tut-spotlight', 'aria-hidden': 'true' } as any);
   const card = el('div', { class: 'tut-card' });
-  const finish = () => {
-    overlay.remove();
-    void api.saveSettings({ tutorial_done: true }).catch(() => { /* 次回また出るだけ */ });
+  const status = el('p', { class: 'tut-status', 'aria-live': 'polite' } as any);
+
+  const removeReplayParam = () => {
+    const url = new URL(location.href);
+    if (!url.searchParams.has('tutorial')) return;
+    url.searchParams.delete('tutorial');
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+  const finish = async () => {
+    card.querySelectorAll('button,input').forEach((node) => node.setAttribute('disabled', 'true'));
+    await api.saveSettings({ tutorial_done: true }).catch(() => { /* 次回また出るだけ */ });
     if (overviewCache?.settings) overviewCache.settings.tutorial_done = true;
+    removeReplayParam();
+    overlay.remove();
+    overviewCache = null;
+    void renderHome();
+  };
+  const advance = () => {
+    if (i === steps.length - 1) void finish();
+    else { i += 1; renderStep(); }
+  };
+  const placeSpotlight = () => {
+    const target = canvas.querySelector<HTMLElement>(steps[i].selector);
+    const canvasRect = canvas.getBoundingClientRect();
+    const scaleX = canvasRect.width / Math.max(1, canvas.clientWidth);
+    const scaleY = canvasRect.height / Math.max(1, canvas.clientHeight);
+    if (!target) {
+      spotlight.style.cssText = 'left:24px;top:110px;width:calc(100% - 48px);height:120px';
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    const pad = steps[i].kind === 'welcome' ? 12 : 7;
+    const left = (rect.left - canvasRect.left) / scaleX - pad;
+    const top = (rect.top - canvasRect.top) / scaleY - pad;
+    const width = rect.width / scaleX + pad * 2;
+    const height = rect.height / scaleY + pad * 2;
+    spotlight.style.left = `${Math.max(5, left)}px`;
+    spotlight.style.top = `${Math.max(5, top)}px`;
+    spotlight.style.width = `${Math.min(canvas.clientWidth - 10, width)}px`;
+    spotlight.style.height = `${height}px`;
+    requestAnimationFrame(() => {
+      const cardHeight = card.offsetHeight || 260;
+      const below = top + height + 18;
+      const desired = top < canvas.clientHeight * .42
+        ? below
+        : top - cardHeight - 18;
+      card.style.top = `${Math.max(76, Math.min(canvas.clientHeight - cardHeight - 96, desired))}px`;
+    });
+  };
+  const quickAmountButton = (label: string, amount: number, input: HTMLInputElement) => {
+    const button = el('button', { type: 'button', class: 'tut-quick', textContent: label });
+    button.addEventListener('click', () => {
+      input.value = String(amount);
+      button.parentElement?.querySelectorAll('.active').forEach((node) => node.classList.remove('active'));
+      button.classList.add('active');
+    });
+    return button;
   };
   const renderStep = () => {
     const st = steps[i];
     const dots = el('div', { class: 'tut-dots' }, steps.map((_, idx) =>
       el('span', { class: 'tut-dot' + (idx === i ? ' active' : '') })));
-    const skip = el('button', { class: 'link-btn tut-skip', textContent: 'スキップ' });
-    const prev = el('button', { type: 'button', class: 'tut-prev', textContent: '← まえへ' });
-    const next = el('button', { type: 'button', class: 'primary tut-next', textContent: i === steps.length - 1 ? 'はじめる！' : 'つぎへ →' });
+    const skip = el('button', { type: 'button', class: 'tut-skip', textContent: 'あとで' });
+    const prev = el('button', { type: 'button', class: 'tut-prev', textContent: '← 戻る' });
+    const next = el('button', {
+      type: 'button',
+      class: 'tut-next',
+      textContent: st.kind === 'finish' ? 'マネコタウンをはじめる' : st.kind === 'welcome' ? '一緒に設定する' : '次へ',
+    });
     prev.disabled = i === 0;
-    skip.addEventListener('click', finish);
+    skip.addEventListener('click', () => void finish());
     prev.addEventListener('click', () => { i = Math.max(0, i - 1); renderStep(); });
-    next.addEventListener('click', () => { if (i === steps.length - 1) finish(); else { i++; renderStep(); } });
+    next.addEventListener('click', advance);
+
+    const body: HTMLElement[] = [];
+    if (st.kind === 'budget') {
+      const budget = el('input', {
+        type: 'number',
+        inputmode: 'numeric',
+        min: '0',
+        class: 'tut-money-input',
+        value: overview.settings?.monthly_budget != null ? String(overview.settings.monthly_budget) : '',
+        placeholder: '例：50000',
+        'aria-label': '月の予算',
+      } as any);
+      const save = el('button', { type: 'button', class: 'tut-next', textContent: '予算を保存して次へ' });
+      save.addEventListener('click', async () => {
+        const amount = Math.round(Number(budget.value));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          status.textContent = '1円以上の予算を入力してね';
+          return;
+        }
+        save.setAttribute('disabled', 'true');
+        status.textContent = '保存中…';
+        try {
+          await api.saveSettings({ monthly_budget: amount });
+          if (overview.settings) overview.settings.monthly_budget = amount;
+          status.textContent = '予算を保存したよ！';
+          window.setTimeout(advance, 350);
+        } catch (error) {
+          save.removeAttribute('disabled');
+          status.textContent = (error as Error).message;
+        }
+      });
+      body.push(
+        el('label', { class: 'tut-input-label' }, ['月の予算', budget, el('span', { textContent: '円' })]),
+        el('div', { class: 'tut-quicks' }, [
+          quickAmountButton('3万円', 30000, budget),
+          quickAmountButton('5万円', 50000, budget),
+          quickAmountButton('10万円', 100000, budget),
+        ]),
+        save,
+      );
+    } else if (st.kind === 'goal' && !existingGoal) {
+      const name = el('input', { class: 'tut-goal-name', value: '', placeholder: '例：旅行、ゲーム機' });
+      const target = el('input', {
+        type: 'number',
+        inputmode: 'numeric',
+        min: '1',
+        class: 'tut-money-input',
+        value: '',
+        placeholder: '例：30000',
+        'aria-label': '目標金額',
+      } as any);
+      const create = el('button', { type: 'button', class: 'tut-next', textContent: '目標を作って次へ' });
+      create.addEventListener('click', async () => {
+        const targetAmount = Math.round(Number(target.value));
+        if (!name.value.trim() || !Number.isFinite(targetAmount) || targetAmount <= 0) {
+          status.textContent = '目標名と金額を入力してね';
+          return;
+        }
+        create.setAttribute('disabled', 'true');
+        status.textContent = '目標を作成中…';
+        try {
+          await api.addGoal({ name: name.value.trim(), emoji: '🎯', target: targetAmount });
+          status.textContent = '目標を作ったよ！';
+          window.setTimeout(advance, 350);
+        } catch (error) {
+          create.removeAttribute('disabled');
+          status.textContent = (error as Error).message;
+        }
+      });
+      body.push(
+        el('label', { class: 'tut-field' }, [el('span', { textContent: '目標' }), name]),
+        el('label', { class: 'tut-input-label' }, ['目標金額', target, el('span', { textContent: '円' })]),
+        create,
+      );
+    } else {
+      body.push(next);
+    }
+    status.textContent = '';
     card.replaceChildren(
       skip,
-      dots,
-      el('div', { class: 'tut-emoji', textContent: st.emoji }),
-      el('h3', { class: 'tut-title', textContent: st.title }),
+      el('div', { class: 'tut-progress' }, [dots, el('span', { textContent: `${i + 1} / ${steps.length}` })]),
+      el('div', { class: 'tut-guide' }, [
+        el('img', { src: '/assets/kids/maneko-3d.webp', alt: '案内役のマネコ' }),
+        el('div', {}, [
+          el('span', { class: 'tut-eyebrow', textContent: st.eyebrow }),
+          el('h3', { class: 'tut-title', textContent: st.title }),
+        ]),
+      ]),
       el('p', { class: 'tut-text', textContent: st.text }),
-      el('div', { class: 'tut-nav' }, [prev, next]),
+      ...body,
+      status,
+      el('div', { class: 'tut-nav' }, [prev]),
     );
+    placeSpotlight();
   };
   renderStep();
-  overlay.append(card);
+  overlay.append(spotlight, card);
   canvas.append(overlay);
+  window.addEventListener('resize', placeSpotlight, { once: true });
 }
 
 function spaceSwitcher(mode: AppMode): HTMLElement | null {
@@ -1109,9 +1291,11 @@ async function renderHome() {
   if (switcher && canvas) canvas.append(switcher);
   window.scrollTo({ top: 0 });
 
-  // 初回チュートリアル（利用タイプ選択の直後・ホームで1回だけ）。月初サマリーと同時に出さないよう優先。
-  if (homeTab === 'home' && !o.settings.tutorial_done) {
-    showTutorialOverlay(o.settings.usage_type ?? (mode === 'kids' ? 'family' : 'personal'), panels[0]);
+  // 初回チュートリアル（利用タイプ選択の直後・ホームで1回だけ）。
+  // モック確認用に ?tutorial=1 でも再生できる。
+  const replayTutorial = new URLSearchParams(location.search).get('tutorial') === '1';
+  if (homeTab === 'home' && mode === 'kids' && (!o.settings.tutorial_done || replayTutorial)) {
+    showTutorialOverlay(o.settings.usage_type ?? 'personal', panels[0], o);
   } else if (homeTab === 'home' && mode === 'adult') {
     // 月初: 先月のかんたんサマリー（おとな・その月はじめて開いたときだけ）
     maybeShowMonthlySummary(o, recent, panels[0], recentFailed);
