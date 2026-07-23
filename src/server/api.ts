@@ -39,6 +39,28 @@ function serverError(res: any, e: unknown) {
 // サーバーのタイムゾーンに依らず JST の今日（YYYY-MM-DD）
 const jstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
+// アプリ内に表示する名前を変更する。ログインID・メールアドレスは変更しない。
+api.put('/profile', async (req, res) => {
+  const displayName = typeof req.body?.display_name === 'string' ? req.body.display_name.trim() : '';
+  if (!displayName || displayName.length > 30) {
+    return res.status(400).json({ error: '表示名は1〜30文字で入力してください' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users
+          SET display_name = $1
+        WHERE id = $2
+        RETURNING id, email, display_name AS username,
+                  (email_verified_at IS NOT NULL) AS email_verified`,
+      [displayName, uid(req)],
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'ユーザーが見つかりません' });
+    res.json(rows[0]);
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
 // ---- アクセス権チェック（所属グループのデータだけ触れる） -------------
 async function tripAccessible(userId: number, tripId: number): Promise<boolean> {
   const { rows } = await pool.query(

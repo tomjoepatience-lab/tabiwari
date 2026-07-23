@@ -139,6 +139,12 @@ export const api = {
     fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then((r) => json<{ ok: true }>(r)),
   resendVerification: () =>
     fetch('/api/auth/resend-verification', { method: 'POST' }).then((r) => json<{ ok: true; alreadyVerified?: boolean }>(r)),
+  updateProfile: (display_name: string) =>
+    fetch('/api/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name }),
+    }).then((r) => json<User>(r)),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }),
   deleteAccount: (password: string) =>
     fetch('/api/auth/account', {

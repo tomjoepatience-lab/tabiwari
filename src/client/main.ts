@@ -15,6 +15,7 @@ import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
 import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
 import { hasNativeMap, openNativeMapPicker, openNativeMapViewer } from './native-map';
+import { applyDisplayPreferences, PREF_KEYS, preferenceEnabled, setPreference, PreferenceKey } from './preferences';
 import { classifyItem, GENRES, Genre } from '../shared/genre';
 
 declare const L: any;
@@ -129,7 +130,7 @@ function stopEventsTimer() {
 }
 // renderHome のたびに呼ぶ。多重 setInterval を作らない（起動は未起動時のみ）。
 function syncEventsPolling(mode: AppMode) {
-  if (mode === 'kids') {
+  if (mode === 'kids' && preferenceEnabled(PREF_KEYS.familyNotifications)) {
     if (!eventsEnabled) {
       eventsEnabled = true;
       try { localStorage.removeItem('maneko_seen_income'); } catch { /* 旧・ホーム限定トーストの既読キーを掃除 */ }
@@ -717,48 +718,122 @@ async function kidsFamilyPhoto(o: Overview): Promise<HTMLElement[]> {
 
 async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
   const sections = await settingsPanel(o, 'kids');
-  const details = el('details', { class: 'kids-photo-settings-details' }, [
-    el('summary', {}, [
-      el('span', { class: 'kids-settings-summary-icon', textContent: '⚙' }),
-      el('span', { class: 'kids-settings-summary-copy' }, [
-        el('strong', { textContent: '詳細設定' }),
-        el('small', { textContent: '家計簿・利用タイプ・アカウント' }),
+  const pageSections = (page: string) => sections.filter((section) => section.dataset.settingsPage === page);
+
+  const preferenceRow = (
+    title: string,
+    description: string,
+    key: PreferenceKey,
+    fallback = true,
+    onChange?: (enabled: boolean) => void,
+  ) => {
+    const input = el('input', { type: 'checkbox', checked: preferenceEnabled(key, fallback) }) as HTMLInputElement;
+    input.addEventListener('change', () => {
+      setPreference(key, input.checked);
+      onChange?.(input.checked);
+    });
+    return el('label', { class: 'kids-settings-toggle-row' }, [
+      el('span', { class: 'kids-settings-toggle-copy' }, [
+        el('strong', { textContent: title }),
+        el('small', { textContent: description }),
       ]),
-      el('b', { textContent: '⌄' }),
-    ]),
-    el('div', { class: 'kids-photo-settings-body' }, sections),
+      el('span', { class: 'kids-settings-switch' }, [input, el('i')]),
+    ]);
+  };
+
+  const notifications = el('section', { class: 'card' }, [
+    el('h2', { textContent: '🔔 通知' }),
+    el('p', { class: 'muted', textContent: 'この端末で表示する記録後のお知らせを選べます。' }),
+    preferenceRow(
+      '記録完了のお知らせ',
+      '支出や貯金を保存したあとにお祝いを表示する',
+      PREF_KEYS.recordNotifications,
+    ),
   ]);
-  const menuItems: Array<[string, string]> = [
-    ['♙', 'プロフィール'],
-    ['♧', '通知'],
-    ['▣', '表示'],
-    ['♢', 'アカウント'],
+  const reportBtn = el('button', { type: 'button', class: 'primary', textContent: '📊 支出レポートを開く' });
+  reportBtn.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
+  const display = el('section', { class: 'card' }, [
+    el('h2', { textContent: '▣ 表示' }),
+    preferenceRow(
+      'マネコのひとこと',
+      'ホームでマネコのアドバイスを表示する',
+      PREF_KEYS.speech,
+    ),
+    preferenceRow(
+      'アニメーションを減らす',
+      '画面の動きを控えめにする',
+      PREF_KEYS.reduceMotion,
+      false,
+      applyDisplayPreferences,
+    ),
+    reportBtn,
+  ]);
+
+  const pages = {
+    profile: pageSections('profile'),
+    notifications: [notifications],
+    display: [display],
+    account: pageSections('account'),
+  };
+  const detailTitle = el('h1', { class: 'kids-photo-title', textContent: 'プロフィール' });
+  const detailBody = el('div', { class: 'kids-photo-settings-body' });
+  const back = el('button', { type: 'button', class: 'kids-settings-back', 'aria-label': '設定に戻る', textContent: '‹' } as any);
+  const detailPane = el('section', { class: 'kids-settings-pane kids-settings-detail' }, [
+    el('div', { class: 'kids-settings-detail-head' }, [back, detailTitle, el('span')]),
+    detailBody,
+  ]);
+
+  const router = el('div', { class: 'kids-settings-router' });
+  const topPane = el('section', { class: 'kids-settings-pane kids-settings-top' });
+  const syncHeight = (pane: HTMLElement) => {
+    router.style.height = `${Math.max(260, pane.scrollHeight)}px`;
+  };
+  const openPage = (title: string, content: HTMLElement[]) => {
+    detailTitle.textContent = title;
+    detailBody.replaceChildren(...content);
+    syncHeight(detailPane);
+    requestAnimationFrame(() => {
+      router.classList.add('show-detail');
+      syncHeight(detailPane);
+    });
+  };
+  back.addEventListener('click', () => {
+    router.classList.remove('show-detail');
+    syncHeight(topPane);
+  });
+
+  const menuItems: Array<[string, string, string, keyof typeof pages]> = [
+    ['♙', 'プロフィール', '表示名・利用タイプ・予算', 'profile'],
+    ['♧', '通知', '記録後のお知らせ', 'notifications'],
+    ['▣', '表示', 'マネコ・アニメーション・レポート', 'display'],
+    ['♢', 'アカウント', '家計簿・メール・ログアウト', 'account'],
   ];
-  const menu = el('div', { class: 'kids-photo-settings-menu' }, menuItems.map(([icon, label]) => {
+  const menu = el('div', { class: 'kids-photo-settings-menu' }, menuItems.map(([icon, label, description, page]) => {
     const button = el('button', { type: 'button' }, [
-      el('span', { textContent: icon }),
-      el('strong', { textContent: label }),
+      el('span', { class: 'kids-settings-menu-icon', textContent: icon }),
+      el('span', { class: 'kids-settings-menu-copy' }, [
+        el('strong', { textContent: label }),
+        el('small', { textContent: description }),
+      ]),
       el('b', { textContent: '›' }),
     ]);
-    button.addEventListener('click', () => {
-      details.open = true;
-      requestAnimationFrame(() => details.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    });
+    button.addEventListener('click', () => openPage(label, pages[page]));
     return button;
   }));
-  const body = [
+  topPane.append(
     el('h1', { class: 'kids-photo-title', textContent: '設定' }),
     menu,
-    el('div', { class: 'kids-photo-legal' }, [
-      el('a', { href: '/privacy.html', target: '_blank', textContent: 'プライバシー' }),
-      el('span', { textContent: '|' }),
-      el('a', { href: '/terms.html', target: '_blank', textContent: '利用規約' }),
-      el('span', { textContent: '|' }),
-      el('a', { href: '/support.html', target: '_blank', textContent: 'サポート' }),
-    ]),
-    details,
-  ];
-  return kidsPhotoShell({ active: 'menu', family: false, scene: 'settings', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
+  );
+  router.append(topPane, detailPane);
+  requestAnimationFrame(() => syncHeight(topPane));
+
+  return kidsPhotoShell({
+    active: 'menu',
+    family: false,
+    scene: 'settings',
+    body: [router],
+    goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); },
+  });
 }
 
 // 利用タイプ（家族/個人）選択。usage_type が未選択のユーザーは必ずここを通る。
@@ -954,6 +1029,7 @@ async function renderHome() {
   if (!o.settings) { renderUsagePicker(null); return; }
   if (o.settings.usage_type == null) { renderUsagePicker(o.settings); return; } // 既存ユーザーも初回だけ利用タイプを選ばせる（mode は保持）
   const mode: AppMode = o.settings.mode;
+  applyDisplayPreferences();
   syncEventsPolling(mode); // こどもモードなら着信ポーリング開始（おとなは停止）
   document.body.classList.toggle('theme-kids', mode === 'kids');
   document.body.classList.toggle('theme-adult', mode === 'adult');
@@ -1289,15 +1365,36 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const s = o.settings!;
   const kids = mode === 'kids';
 
+  const displayName = el('input', {
+    type: 'text',
+    value: currentUser?.username ?? '',
+    maxLength: 30,
+    autocomplete: 'name',
+    placeholder: 'アプリに表示する名前',
+  });
+  const saveProfile = el('button', { class: 'primary', textContent: '表示名を保存' });
+  saveProfile.addEventListener('click', async () => {
+    const name = displayName.value.trim();
+    if (!name) return alert('表示名を入力してください');
+    saveProfile.disabled = true;
+    try {
+      const user = await api.updateProfile(name);
+      currentUser = currentUser ? { ...currentUser, ...user } : user;
+      displayName.value = user.username;
+      alert('表示名を保存しました');
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      saveProfile.disabled = false;
+    }
+  });
   const modeSec = el('section', { class: 'card' }, [
     el('h2', { textContent: kids ? '👤 プロフィール' : '⚙️ 設定' }),
-    el('p', { class: 'muted', textContent: `${currentUser?.username ?? ''} ・ ${kids ? 'マネコタウン' : '大人モード'}` }),
+    el('p', { class: 'muted', textContent: `${kids ? 'マネコタウン' : '大人モード'}で表示する名前です。` }),
+    el('div', { class: 'row' }, [labeled('表示名', displayName), saveProfile]),
   ]);
-  if (kids) {
-    const reportBtn = el('button', { class: 'link-btn', textContent: '📊 支出レポートを見る' });
-    reportBtn.addEventListener('click', () => { homeTab = 'report'; void renderHome(); });
-    modeSec.append(reportBtn);
-  } else {
+  modeSec.dataset.settingsPage = 'profile';
+  if (!kids) {
     // 既存の大人モード利用者には、マネコタウンへの一方向の移行だけ残す。
     const townBtn = el('button', { class: 'primary', textContent: '🏘️ マネコタウンに切り替え' });
     townBtn.addEventListener('click', async () => {
@@ -1325,6 +1422,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
       ? '現在は個人利用です。' : '現在は家族利用です。' }),
     usageBtn,
   ]);
+  usageSec.dataset.settingsPage = 'profile';
 
   // お金の設定（モードで出し分け）
   const budget = el('input', { type: 'number', class: 'price', value: s.monthly_budget != null ? String(s.monthly_budget) : '', placeholder: '例: 220000' });
@@ -1358,6 +1456,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
       ? '予算を設定するとホームに「今月あと使える」を表示します。未設定なら今月の支出を表示します。'
       : '予算を設定するとホームに「今月あと使える」が表示されます。' }),
   ]);
+  moneySec.dataset.settingsPage = 'profile';
 
   const logout = el('button', { class: 'link-btn', textContent: 'ログアウト' });
   logout.addEventListener('click', async () => {
@@ -1398,6 +1497,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
       el('a', { href: '/support.html', target: '_blank', class: 'link-btn', textContent: 'サポート' }),
     ]),
   ]);
+  logoutSec.dataset.settingsPage = 'account';
   if (currentUser?.email && !currentUser.email_verified) {
     const resend = el('button', { class: 'link-btn', textContent: '確認メールを再送' });
     resend.addEventListener('click', async () => {
@@ -1418,6 +1518,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
   const familySec = isPersonal ? null : await familyLinkCard(mode, o);
 
   const spacesSec = groupsCard(myGroups);
+  spacesSec.dataset.settingsPage = 'account';
   if (kids && familySec) {
     const intro = el('section', { class: 'card family-tab-intro' }, [
       el('span', { class: 'family-tab-kicker', textContent: 'FAMILY' }),

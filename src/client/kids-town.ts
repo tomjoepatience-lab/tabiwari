@@ -4,6 +4,7 @@ import { Insight } from './advice';
 import { ReactionKind } from './character';
 import { featuredGoal, currentStage, journeyPercent, STAGES } from './journey';
 import { openJourney } from './journey-town';
+import { PREF_KEYS, preferenceEnabled } from './preferences';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
@@ -218,18 +219,23 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
     : ['今日も一歩ずつ進もう。', '記録すると街の変化が分かりやすいよ。'];
   let line = 0;
   stopKidsSpeech();
-  speechTimer = window.setInterval(() => {
-    if (!canvas.isConnected) return stopKidsSpeech();
-    say(lines[line++ % lines.length]);
-  }, 11000);
-  window.setTimeout(() => say(lines[0]), args.celebrate ? 3200 : 900);
+  const speechEnabled = preferenceEnabled(PREF_KEYS.speech);
+  if (speechEnabled) {
+    speechTimer = window.setInterval(() => {
+      if (!canvas.isConnected) return stopKidsSpeech();
+      say(lines[line++ % lines.length]);
+    }, 11000);
+    window.setTimeout(() => say(lines[0]), args.celebrate ? 3200 : 900);
+  }
   cat?.addEventListener('click', () => {
     cat.classList.remove('is-tapped');
     requestAnimationFrame(() => cat.classList.add('is-tapped'));
-    say(['今日も一緒に進もう！', '貯金すると街が育つよ。', 'いい調子！'][Math.floor(Math.random() * 3)]);
+    if (speechEnabled) {
+      say(['今日も一緒に進もう！', '貯金すると街が育つよ。', 'いい調子！'][Math.floor(Math.random() * 3)]);
+    }
   });
 
-  if (args.celebrate) {
+  if (args.celebrate && preferenceEnabled(PREF_KEYS.recordNotifications)) {
     const toast = canvas.querySelector<HTMLElement>('#k-toast');
     window.setTimeout(() => {
       if (!toast) return;
