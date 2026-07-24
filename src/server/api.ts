@@ -57,10 +57,17 @@ async function syncRevenueCat(userId: number) {
      VALUES ($1, $2, $3, $4, now())
      ON CONFLICT (user_id) DO UPDATE SET
        premium_until = EXCLUDED.premium_until,
-       iap_goal_icons = EXCLUDED.iap_goal_icons,
-       iap_season_costumes = EXCLUDED.iap_season_costumes,
+       iap_goal_icons = CASE
+         WHEN user_settings.iap_test_access THEN true
+         ELSE EXCLUDED.iap_goal_icons
+       END,
+       iap_season_costumes = CASE
+         WHEN user_settings.iap_test_access THEN true
+         ELSE EXCLUDED.iap_season_costumes
+       END,
        season_costume = CASE
-         WHEN EXCLUDED.iap_season_costumes THEN user_settings.season_costume
+         WHEN user_settings.iap_test_access OR EXCLUDED.iap_season_costumes
+           THEN user_settings.season_costume
          ELSE NULL
        END,
        iap_synced_at = now()

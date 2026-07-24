@@ -1531,17 +1531,11 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 .cal-inc-name { font-size: 13px; font-weight: 700; color: #2E2A24; }
 .cal-inc-amt { color: #1E7A43; font-size: 13px; }
 
-/* レポート上部の複数家計簿切替。縦スクロール中も上部に固定し、横方向だけスライドする。 */
+/* レポートカード内の複数家計簿切替。縦方向には他の内容と一緒にスクロールする。 */
 .report-group-switcher {
-  position: sticky;
-  top: 0;
-  z-index: 180;
-  margin: -10px -13px 4px;
-  padding: 9px 10px 8px;
-  background: rgba(255, 249, 235, .96);
+  margin: 0 0 12px;
+  padding: 0 0 10px;
   border-bottom: 1px solid rgba(142, 94, 28, .14);
-  box-shadow: 0 5px 12px rgba(80, 50, 16, .08);
-  backdrop-filter: blur(12px);
 }
 .report-group-label {
   display: block;
@@ -1601,6 +1595,21 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 @keyframes report-group-shake {
   25% { transform: translateX(-3px); }
   75% { transform: translateX(3px); }
+}
+.kids-report-summary .report-group-switcher {
+  margin: -2px -3px 11px;
+  border-bottom-color: rgba(255,255,255,.17);
+}
+.kids-report-summary .report-group-label { color: #D8C7AD; }
+.kids-report-summary .report-group-button {
+  border-color: rgba(255,255,255,.24);
+  background: rgba(255,255,255,.1);
+  color: #FFF9E9;
+}
+.kids-report-summary .report-group-button.active {
+  border-color: #F0BB58;
+  background: rgba(240,174,54,.22);
+  color: #FFF4D8;
 }
 
 .rc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
@@ -1667,6 +1676,25 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 .iap-buy:disabled { opacity: .62; }
 .iap-footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .iap-note { margin: 9px 0 0; color: #8C7357; font-size: 10px; text-align: center; }
+.kids-photo-settings-body > .iap-card .iap-buy {
+  width: auto;
+  min-width: 86px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+.kids-photo-settings-body > .iap-card .iap-product-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  writing-mode: horizontal-tb;
+}
+.kids-photo-settings-body > .iap-card .iap-product-copy strong,
+.kids-photo-settings-body > .iap-card .iap-product-copy small {
+  word-break: normal;
+  overflow-wrap: anywhere;
+  writing-mode: horizontal-tb;
+}
 
 /* ======================================================================
    🐾 初回チュートリアル（利用タイプ選択の直後・1回だけ）
@@ -2220,6 +2248,21 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   pointer-events: none;
   object-fit: contain;
   object-position: center bottom;
+}
+.kids-maneko-v3 .kids-maneko-season-costume-body {
+  transform: translateY(8%);
+}
+.kids-maneko-v3 .kids-maneko-season-costume-hat {
+  z-index: 3;
+}
+.kids-maneko-v3.costume-summer-festival .kids-maneko-season-costume-hat {
+  transform: translateY(-3%);
+}
+.kids-maneko-v3.costume-autumn-artist .kids-maneko-season-costume-body {
+  transform: translateY(13%);
+}
+.kids-maneko-v3.costume-autumn-harvest .kids-maneko-season-costume-body {
+  transform: translateY(14%);
 }
 .kids-maneko-v3-shadow {
   position: absolute;

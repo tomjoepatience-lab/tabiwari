@@ -1,4 +1,4 @@
-import { api, AppMode, Group, IncomeRow, IapStatus, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, SavingsGoal, Trip, TripDetail, User, UsageType, UserSettings } from './api';
+import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, SavingsGoal, Trip, TripDetail, User, UsageType, UserSettings } from './api';
 import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
@@ -15,7 +15,7 @@ import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
 import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
 import { hasNativeMap, openNativeMapPicker, openNativeMapViewer } from './native-map';
-import { getNativeIapState, hasNativeIap, purchaseNativeIap, restoreNativeIap, NativeIapState } from './native-iap';
+import { getNativeIapState, hasNativeIap, purchaseNativeIap, restoreNativeIap } from './native-iap';
 import { applyDisplayPreferences, PREF_KEYS, preferenceEnabled, setPreference, PreferenceKey } from './preferences';
 import { classifyItem, GENRES, Genre } from '../shared/genre';
 
@@ -484,10 +484,10 @@ function kidsReportPhoto(
   ]);
   backToRecord.addEventListener('click', () => { homeTab = 'add'; void renderHome(); });
   const body = [
-    ...(groupSwitcher ? [groupSwitcher] : []),
     kidsRecordModeSwitch('report'),
     el('h1', { class: 'kids-photo-title', textContent: 'レポート' }),
     el('section', { class: 'kids-report-summary' }, [
+      ...(groupSwitcher ? [groupSwitcher] : []),
       el('span', { textContent: `${now.getMonth() + 1}月の支出` }),
       el('strong', { textContent: `-${yen(monthSpend)}` }),
       el('small', { textContent: `記録した日 ${days}日 ・ ${thisMonth.length}件` }),
@@ -604,7 +604,7 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
       ...(locked ? [el('span', { class: 'kids-goal-icon-lock', textContent: '🔒' })] : []),
     ]);
     button.addEventListener('click', () => {
-      if (locked) return alert('かわいい目標アイコンパックは「設定 → アカウント」から購入できます');
+      if (locked) return alert('目標アイコンパックは「設定 → アカウント」から購入できます');
       selectedEmoji = option.emoji;
       drawIconPicker();
     });
@@ -1401,7 +1401,7 @@ async function renderHome() {
     const groupSwitcher = reportGroupSwitcher();
     panels = mode === 'kids'
       ? kidsReportPhoto(o, recent, incomes, groupSwitcher)
-      : wrapPhone(mode, homeTab, [...(groupSwitcher ? [groupSwitcher] : []), genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]);
+      : wrapPhone(mode, homeTab, [genreReportSec(recent, groupSwitcher), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]);
   } else if (homeTab === 'savings') {
     panels = mode === 'kids' ? kidsSavingsPhoto(o) : wrapPhone(mode, homeTab, savingsPanel(o, mode));
   } else {
@@ -1665,32 +1665,17 @@ const IAP_PRODUCTS = {
   seasonCostumes: 'com.tomjo.maneko.costumes.seasons',
 } as const;
 
-async function iapCard(): Promise<HTMLElement> {
-  const status = await api.iapStatus().catch((): IapStatus => ({
-    plus: false,
-    goal_icons: false,
-    season_costumes: false,
-    premium_until: null,
-    synced_at: null,
-    app_user_id: currentUser ? `maneko-user-${currentUser.id}` : '',
-  }));
-  let nativeState: NativeIapState | null = null;
-  if (currentUser && hasNativeIap()) {
-    nativeState = await getNativeIapState(currentUser.id).catch((error): NativeIapState => ({
-      configured: false,
-      products: [],
-      entitlements: [],
-      error: (error as Error).message,
-    }));
-  }
-  const priceOf = (id: string, fallback: string) =>
-    nativeState?.products.find((product) => product.id === id)?.price ?? fallback;
-  const activeSubscriptions = new Set(nativeState?.activeProductIds ?? []);
-  const hasKnownActiveSubscription = activeSubscriptions.size > 0;
-  const monthlyOwned = activeSubscriptions.has(IAP_PRODUCTS.plusMonthly)
-    || (status.plus && !hasKnownActiveSubscription);
-  const annualOwned = activeSubscriptions.has(IAP_PRODUCTS.plusAnnual)
-    || (status.plus && !hasKnownActiveSubscription);
+function iapCard(settings: UserSettings): HTMLElement {
+  // 設定画面を開くたびにRevenueCatを待つと、Expo Goや通信不良時に最大45秒止まる。
+  // 購入権限はoverviewへ同期済みのDB値で即時描画し、App Store通信は購入・復元時だけ行う。
+  const status = {
+    plus: !!settings.premium_until && new Date(settings.premium_until).getTime() > Date.now(),
+    goal_icons: settings.iap_goal_icons === true,
+    season_costumes: settings.iap_season_costumes === true,
+  };
+  const priceOf = (_id: string, fallback: string) => fallback;
+  const monthlyOwned = status.plus;
+  const annualOwned = status.plus;
 
   const card = el('section', { class: 'card iap-card' }, [
     el('div', { class: 'iap-heading' }, [
@@ -1755,7 +1740,7 @@ async function iapCard(): Promise<HTMLElement> {
       product('月額プラン', '毎月更新・いつでも変更できます', priceOf(IAP_PRODUCTS.plusMonthly, '¥380'), IAP_PRODUCTS.plusMonthly, monthlyOwned, true),
       product('年額プラン', '月額換算でお得な年間プラン', priceOf(IAP_PRODUCTS.plusAnnual, '¥2,980'), IAP_PRODUCTS.plusAnnual, annualOwned, true),
     ]),
-    product('かわいい目標アイコンパック', '目標貯金で使えるプレミアムアイコン10種類以上', priceOf(IAP_PRODUCTS.goalIcons, '¥160'), IAP_PRODUCTS.goalIcons, status.goal_icons),
+    product('目標アイコンパック', '目標貯金で使えるプレミアムアイコン10種類以上', priceOf(IAP_PRODUCTS.goalIcons, '¥160'), IAP_PRODUCTS.goalIcons, status.goal_icons),
     product('季節の衣装パック', '春夏秋冬それぞれ2種類・合計8種類', priceOf(IAP_PRODUCTS.seasonCostumes, '¥320'), IAP_PRODUCTS.seasonCostumes, status.season_costumes),
   );
 
@@ -1781,7 +1766,6 @@ async function iapCard(): Promise<HTMLElement> {
     ]),
     el('p', { class: 'iap-note', textContent: 'マネコプラスは月額または年額の自動更新です。期間終了の24時間前までに解約しない限り、Apple IDへ課金され更新されます。' }),
     ...(!hasNativeIap() ? [el('p', { class: 'iap-note', textContent: '購入・復元はApp Storeからインストールしたアプリで利用できます。' })] : []),
-    ...(nativeState?.error ? [el('p', { class: 'status err', textContent: nativeState.error })] : []),
   );
   return card;
 }
@@ -1944,7 +1928,7 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
 
   const spacesSec = groupsCard(myGroups);
   spacesSec.dataset.settingsPage = 'account';
-  const storeSec = await iapCard();
+  const storeSec = iapCard(s);
   storeSec.dataset.settingsPage = 'account';
   if (kids && familySec) {
     const intro = el('section', { class: 'card family-tab-intro' }, [
@@ -2508,7 +2492,7 @@ function calendarPanel(recent: RecentReceipt[], readonly = false, incomes: Incom
 }
 
 // --- 📊 ジャンル別（今月・自動分類の結果） --------------------------------
-function genreReportSec(recent: RecentReceipt[]): HTMLElement {
+function genreReportSec(recent: RecentReceipt[], groupSwitcher: HTMLElement | null = null): HTMLElement {
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const map = new Map<string, number>();
@@ -2524,6 +2508,7 @@ function genreReportSec(recent: RecentReceipt[]): HTMLElement {
   const total = rows.reduce((s, [, v]) => s + v, 0);
   return el('section', { class: 'card' }, [
     el('h2', { textContent: `📊 今月のジャンル別（${now.getMonth() + 1}月 ・ ${yen(total)}）` }),
+    ...(groupSwitcher ? [groupSwitcher] : []),
     ...(rows.length
       ? rows.map(([g, v]) => {
           const [bg, fg] = genreColor(g);

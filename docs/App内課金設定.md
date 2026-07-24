@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- |
 | 自動更新サブスクリプション | マネコプラス 月額 | `com.tomjo.maneko.plus.monthly` | 月額380円 | `maneko_plus` |
 | 自動更新サブスクリプション | マネコプラス 年額 | `com.tomjo.maneko.plus.annual` | 年額2,980円 | `maneko_plus` |
-| 非消費型（買い切り） | かわいい目標アイコンパック | `com.tomjo.maneko.goalicons.cute` | 160円 | `goal_icon_pack` |
+| 非消費型（買い切り） | 目標アイコンパック | `com.tomjo.maneko.goalicons.cute` | 160円 | `goal_icon_pack` |
 | 非消費型（買い切り） | 季節の衣装パック | `com.tomjo.maneko.costumes.seasons` | 320円 | `season_costume_pack` |
 
 Product ID と entitlement ID は、上記の文字列をそのまま使う。

@@ -201,10 +201,13 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
 
       <button type="button" id="k-town" class="kids-town-open" aria-label="風景をタップするとマネコ以外を隠します"></button>
 
-      <div id="k-cat" class="kids-maneko-v3${moving ? ' is-moving' : ''}" aria-label="マネコ">
+      <div id="k-cat" class="kids-maneko-v3${moving ? ' is-moving' : ''}${settings.season_costume ? ` costume-${esc(settings.season_costume)}` : ''}" aria-label="マネコ">
         <span class="kids-maneko-v3-shadow"></span>
         <img id="m-cat-body" src="/assets/kids/maneko-stage-${stage}.webp" alt="マネコ">
-        ${seasonalCostume ? `<img class="kids-maneko-season-costume" src="${seasonalCostume}" alt="">` : ''}
+        ${seasonalCostume ? `
+          <img class="kids-maneko-season-costume kids-maneko-season-costume-body" src="${seasonalCostume.replace('.png', '-body.png')}" alt="">
+          <img class="kids-maneko-season-costume kids-maneko-season-costume-hat" src="${seasonalCostume.replace('.png', '-hat.png')}" alt="">
+        ` : ''}
       </div>
 
       <div id="k-bubble" class="kids-bubble-v3" aria-live="polite">

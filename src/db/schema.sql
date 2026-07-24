@@ -272,6 +272,7 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_week_used integer NOT NUL
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS premium_until timestamptz;      -- NULL=無料。IAP実装(M3)がここを書く
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_goal_icons boolean NOT NULL DEFAULT false;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_season_costumes boolean NOT NULL DEFAULT false;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_test_access boolean NOT NULL DEFAULT false;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_synced_at timestamptz;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS season_costume TEXT;
 CREATE INDEX IF NOT EXISTS idx_chores_link ON chores (link_id);
