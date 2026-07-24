@@ -58,7 +58,7 @@
 - [x] `expo-doctor` 18/18、依存関係チェック正常
 - [x] 6.5インチスクリーンショット 6枚（1242×2688）
 - [x] 13インチスクリーンショット 6枚（2064×2752）
-- [ ] production EAS build完了
+- [x] production EAS build完了（1.0.0 / build 4 / `4c81db25-66bf-4fe5-b1cd-f61314b1317f`）
 - [ ] TestFlight実機で最終確認
 - [ ] App Store Connectメタデータ・App Privacy入力
 - [ ] 審査へ提出

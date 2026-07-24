@@ -64,3 +64,11 @@ C:\Users\tomjo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\p
 - パスワード: `demo1234`
 - レシートOCR・位置情報・写真は任意です。許可しなくても手入力で利用できます。
 - アカウント削除: 設定 → アカウント → アカウントを削除
+
+## 最新のEAS production build
+
+- Version: 1.0.0
+- Build: 4
+- Build ID: `4c81db25-66bf-4fe5-b1cd-f61314b1317f`
+- Git commit: `92fc480b68b6827a9e82e16001f013b04fbac9a4`
+- IPA: https://expo.dev/artifacts/eas/WJgxpYlMlA7lqg0Urnnj7dTnthxWwu6pBfIy8BB06pE.ipa
