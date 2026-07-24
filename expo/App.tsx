@@ -4,6 +4,7 @@ import {
   Easing,
   Linking,
   Modal,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
@@ -15,6 +16,7 @@ import WebView from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 
 // マネコ家計簿の本体は Render 上の既存Webアプリ（cookieセッション認証込み）。
 // このExpoアプリは全画面WebViewでそれを表示するだけの「殻」。
@@ -31,6 +33,14 @@ type NativeMapRequest = {
   points?: MapPoint[];
   title?: string;
 };
+type NativeIapRequest = {
+  type: 'IAP_GET_STATE' | 'IAP_PURCHASE' | 'IAP_RESTORE';
+  requestId: string;
+  userId: number;
+  productId?: string;
+};
+
+const REVENUECAT_IOS_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? '';
 
 const DEFAULT_REGION: Region = {
   latitude: 35.681,
@@ -53,6 +63,8 @@ function inviteWebUrl(url: string): string | null {
 export default function App() {
   const webViewRef = useRef<WebView>(null);
   const mapRef = useRef<MapView>(null);
+  const revenueCatUserRef = useRef<string | null>(null);
+  const revenueCatConfiguredRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [webUri, setWebUri] = useState(HOME_URL);
@@ -63,6 +75,13 @@ export default function App() {
   const [placeSearching, setPlaceSearching] = useState(false);
   const [placeSearchMessage, setPlaceSearchMessage] = useState('');
   const loaderProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !REVENUECAT_IOS_API_KEY || revenueCatConfiguredRef.current) return;
+    Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.INFO);
+    Purchases.configure({ apiKey: REVENUECAT_IOS_API_KEY });
+    revenueCatConfiguredRef.current = true;
+  }, []);
 
   const points = mapRequest?.points ?? [];
   const initialRegion = useMemo<Region>(() => {
@@ -140,6 +159,74 @@ export default function App() {
     setPlaceSearchMessage('');
   }, [mapRequest]);
 
+  const sendIapResult = useCallback((requestId: string, state: unknown, cancelled = false) => {
+    const message = JSON.stringify({ type: 'NATIVE_IAP_RESULT', requestId, state, cancelled });
+    webViewRef.current?.injectJavaScript(
+      `window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(message)}}));true;`,
+    );
+  }, []);
+
+  const loadIapState = useCallback(async (userId: number) => {
+    if (!revenueCatConfiguredRef.current) {
+      return {
+        configured: false,
+        products: [],
+        entitlements: [],
+        error: 'RevenueCatの公開iOSキーが未設定です',
+      };
+    }
+    const appUserId = `maneko-user-${userId}`;
+    if (revenueCatUserRef.current !== appUserId) {
+      await Purchases.logIn(appUserId);
+      revenueCatUserRef.current = appUserId;
+    }
+    const [offerings, customerInfo] = await Promise.all([
+      Purchases.getOfferings(),
+      Purchases.getCustomerInfo(),
+    ]);
+    const packages = offerings.current?.availablePackages ?? [];
+    return {
+      configured: true,
+      products: packages.map((item) => ({
+        id: item.product.identifier,
+        title: item.product.title,
+        description: item.product.description,
+        price: item.product.priceString,
+        packageId: item.identifier,
+      })),
+      entitlements: Object.keys(customerInfo.entitlements.active),
+      activeProductIds: customerInfo.activeSubscriptions,
+    };
+  }, []);
+
+  const handleIapRequest = useCallback(async (message: NativeIapRequest) => {
+    try {
+      await loadIapState(message.userId);
+      if (message.type === 'IAP_PURCHASE') {
+        const offerings = await Purchases.getOfferings();
+        const pack = offerings.current?.availablePackages.find(
+          (item) => item.product.identifier === message.productId,
+        );
+        if (!pack) throw new Error('App Storeの商品が見つかりません');
+        await Purchases.purchasePackage(pack);
+      } else if (message.type === 'IAP_RESTORE') {
+        await Purchases.restorePurchases();
+      }
+      sendIapResult(message.requestId, await loadIapState(message.userId));
+    } catch (error: any) {
+      if (error?.userCancelled) {
+        sendIapResult(message.requestId, { configured: true, products: [], entitlements: [] }, true);
+        return;
+      }
+      sendIapResult(message.requestId, {
+        configured: revenueCatConfiguredRef.current,
+        products: [],
+        entitlements: [],
+        error: error instanceof Error ? error.message : '購入処理に失敗しました',
+      });
+    }
+  }, [loadIapState, sendIapResult]);
+
   const useCurrentLocation = useCallback(async () => {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (permission.status !== 'granted') return;
@@ -201,17 +288,20 @@ export default function App() {
 
   const handleWebMessage = useCallback((event: any) => {
     try {
-      const message = JSON.parse(event.nativeEvent.data) as NativeMapRequest;
-      if (message.type !== 'OPEN_MAP_PICKER' && message.type !== 'OPEN_MAP_VIEWER') return;
-      setPicked(message.initial ?? null);
-      setPlaceQuery(message.initial?.name ?? '');
-      setPlaceResults([]);
-      setPlaceSearchMessage('');
-      setMapRequest(message);
+      const message = JSON.parse(event.nativeEvent.data) as NativeMapRequest | NativeIapRequest;
+      if (message.type === 'OPEN_MAP_PICKER' || message.type === 'OPEN_MAP_VIEWER') {
+        setPicked(message.initial ?? null);
+        setPlaceQuery(message.initial?.name ?? '');
+        setPlaceResults([]);
+        setPlaceSearchMessage('');
+        setMapRequest(message);
+      } else if (message.type === 'IAP_GET_STATE' || message.type === 'IAP_PURCHASE' || message.type === 'IAP_RESTORE') {
+        void handleIapRequest(message);
+      }
     } catch {
       // アプリが理解しないWebメッセージは無視する。
     }
-  }, []);
+  }, [handleIapRequest]);
 
   // 別オリジンへのメインフレーム遷移だけを外部ブラウザへ逃がす。
   // 地図タイルの取得などのサブリソース読み込みは isTopFrame===false、

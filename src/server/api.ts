@@ -16,13 +16,79 @@ api.get('/config', (_req, res) => {
 // requireAuth 通過後なので userId は必ずある
 const uid = (req: Request) => (req as any).userId as number;
 const publicAppUrl = () => (process.env.PUBLIC_APP_URL || 'https://tabiwari-mu.vercel.app').replace(/\/+$/, '');
+const revenueCatUserId = (userId: number) => `maneko-user-${userId}`;
+const IAP_ENTITLEMENTS = {
+  plus: 'maneko_plus',
+  goalIcons: 'goal_icon_pack',
+  seasonCostumes: 'season_costume_pack',
+} as const;
 
-// 指定されたスペースが本人の所属先ならその1件、未指定なら設定中のスペース、
-// それも無ければ最初の所属先を返す。
+type RevenueCatEntitlement = {
+  expires_date?: string | null;
+  grace_period_expires_date?: string | null;
+};
+
+const entitlementActive = (entitlement: RevenueCatEntitlement | undefined) => {
+  if (!entitlement) return false;
+  if (entitlement.expires_date == null) return true;
+  const expires = Date.parse(entitlement.grace_period_expires_date || entitlement.expires_date);
+  return Number.isFinite(expires) && expires > Date.now();
+};
+
+async function syncRevenueCat(userId: number) {
+  const secret = process.env.REVENUECAT_SECRET_API_KEY;
+  if (!secret) throw new Error('REVENUECAT_SECRET_API_KEY が未設定です');
+  const response = await fetch(
+    `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(revenueCatUserId(userId))}`,
+    { headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
+  );
+  if (!response.ok) throw new Error(`RevenueCat API error (${response.status})`);
+  const body: any = await response.json();
+  const entitlements: Record<string, RevenueCatEntitlement> = body?.subscriber?.entitlements ?? {};
+  const plus = entitlements[IAP_ENTITLEMENTS.plus];
+  const plusActive = entitlementActive(plus);
+  const goalIcons = entitlementActive(entitlements[IAP_ENTITLEMENTS.goalIcons]);
+  const seasonCostumes = entitlementActive(entitlements[IAP_ENTITLEMENTS.seasonCostumes]);
+  const premiumUntil = plusActive
+    ? (plus?.grace_period_expires_date || plus?.expires_date || new Date(Date.now() + 24 * 3600_000).toISOString())
+    : null;
+  const { rows } = await pool.query(
+    `INSERT INTO user_settings (user_id, premium_until, iap_goal_icons, iap_season_costumes, iap_synced_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (user_id) DO UPDATE SET
+       premium_until = EXCLUDED.premium_until,
+       iap_goal_icons = EXCLUDED.iap_goal_icons,
+       iap_season_costumes = EXCLUDED.iap_season_costumes,
+       season_costume = CASE
+         WHEN EXCLUDED.iap_season_costumes THEN user_settings.season_costume
+         ELSE NULL
+       END,
+       iap_synced_at = now()
+     RETURNING premium_until, iap_goal_icons, iap_season_costumes, iap_synced_at`,
+    [userId, premiumUntil, goalIcons, seasonCostumes],
+  );
+  return {
+    ...rows[0],
+    plus: plusActive,
+    goal_icons: goalIcons,
+    season_costumes: seasonCostumes,
+    app_user_id: revenueCatUserId(userId),
+  };
+}
+
+// 指定されたスペースが本人の所属先ならその複数件、未指定なら設定中のスペース、
+// それも無ければ最初の所属先を返す。group_ids はレポートの複数選択用。
 async function scopedGroupIds(req: Request): Promise<number[]> {
   const userId = uid(req);
   const available = await userGroupIds(userId);
   if (!available.length) return [];
+  const requestedMany = typeof req.query.group_ids === 'string'
+    ? [...new Set(req.query.group_ids.split(',').map(Number).filter(Number.isInteger))]
+    : [];
+  if (requestedMany.length) {
+    const allowed = requestedMany.filter((id) => available.includes(id));
+    if (allowed.length) return allowed;
+  }
   const requested = Number(req.query.group_id);
   if (Number.isInteger(requested) && available.includes(requested)) return [requested];
   const { rows } = await pool.query(`SELECT active_group_id FROM user_settings WHERE user_id = $1`, [userId]);
@@ -35,6 +101,68 @@ function serverError(res: any, e: unknown) {
   console.error(e);
   res.status(500).json({ error: 'サーバーエラーが発生しました' });
 }
+
+// RevenueCatで検証済みの権限をDBへ同期する。秘密鍵はサーバーだけが持ち、
+// クライアントから送られた「購入済み」フラグは一切信用しない。
+api.post('/iap/sync', async (req, res) => {
+  try {
+    res.json(await syncRevenueCat(uid(req)));
+  } catch (error) {
+    console.error('[iap] sync failed', error);
+    res.status(503).json({ error: '購入情報を確認できませんでした。少し待ってからもう一度お試しください。' });
+  }
+});
+
+api.get('/iap/status', async (req, res) => {
+  try {
+    const userId = uid(req);
+    const { rows } = await pool.query(
+      `SELECT premium_until, iap_goal_icons, iap_season_costumes, iap_synced_at
+         FROM user_settings WHERE user_id = $1`,
+      [userId],
+    );
+    const row = rows[0] ?? {};
+    res.json({
+      plus: !!row.premium_until && new Date(row.premium_until).getTime() > Date.now(),
+      goal_icons: row.iap_goal_icons === true,
+      season_costumes: row.iap_season_costumes === true,
+      premium_until: row.premium_until ?? null,
+      synced_at: row.iap_synced_at ?? null,
+      app_user_id: revenueCatUserId(userId),
+    });
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
+const SEASON_COSTUMES = new Set([
+  'spring-sakura',
+  'spring-picnic',
+  'summer-marine',
+  'summer-festival',
+  'autumn-artist',
+  'autumn-harvest',
+  'winter-snow',
+  'winter-holiday',
+]);
+
+api.put('/iap/season-costume', async (req, res) => {
+  const id = req.body?.id == null ? null : String(req.body.id);
+  if (id !== null && !SEASON_COSTUMES.has(id)) return res.status(400).json({ error: 'その衣装は存在しません' });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE user_settings
+          SET season_costume = $1
+        WHERE user_id = $2 AND iap_season_costumes = true
+      RETURNING season_costume`,
+      [id, uid(req)],
+    );
+    if (!rows[0]) return res.status(403).json({ error: '季節の衣装パックを購入すると選べます' });
+    res.json(rows[0]);
+  } catch (error) {
+    serverError(res, error);
+  }
+});
 
 // サーバーのタイムゾーンに依らず JST の今日（YYYY-MM-DD）
 const jstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
@@ -856,18 +984,22 @@ api.get('/expenses/recent', async (req, res) => {
   if (!gids.length) return res.json({ receipts: [] });
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 400);
   const { rows } = await pool.query(
-    `SELECT r.id, r.trip_id, t.title AS trip_title, t.kind, r.store_name, r.category,
-            r.purchased_on, r.created_at, r.lat, r.lng, r.place_name,
+    `SELECT r.id, r.trip_id, t.title AS trip_title, t.kind, t.group_id, g.name AS group_name,
+            r.store_name, r.category, r.purchased_on, r.created_at, r.lat, r.lng, r.place_name,
+            r.paid_by, payer.name AS paid_by_name,
+            (SELECT count(*)::int FROM group_members gm_count WHERE gm_count.group_id = t.group_id) AS group_member_count,
             COALESCE(SUM(i.price), 0)::int AS total,
             COALESCE(json_agg(json_build_object('id', i.id, 'name', i.name, 'price', i.price, 'quantity', i.quantity, 'genre', i.genre)
                               ORDER BY i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS items,
             COALESCE((SELECT json_agg(p.id ORDER BY p.id) FROM trip_photos p WHERE p.receipt_id = r.id AND p.trip_id = r.trip_id), '[]') AS photo_ids
        FROM receipts r
        JOIN trips t ON t.id = r.trip_id
+       JOIN user_groups g ON g.id = t.group_id
+       LEFT JOIN members payer ON payer.id = r.paid_by
        LEFT JOIN items i ON i.receipt_id = r.id
       WHERE t.group_id = ANY($1::int[])
         AND r.purchased_on >= (CURRENT_DATE - $2::int)
-      GROUP BY r.id, t.title, t.kind
+      GROUP BY r.id, t.title, t.kind, t.group_id, g.name, payer.name
       ORDER BY r.purchased_on DESC, r.id DESC`,
     [gids, days]
   );
@@ -1265,10 +1397,28 @@ api.post('/expenses/quick', async (req, res) => {
           [`${uname}の家計簿`, targetGroupId]
         )).rows[0];
       }
-      let member = (await client.query(`SELECT id FROM members WHERE trip_id = $1 AND name = $2 LIMIT 1`, [trip.id, uname])).rows[0]
-        ?? (await client.query(`SELECT id FROM members WHERE trip_id = $1 ORDER BY id LIMIT 1`, [trip.id])).rows[0];
+      let member = (await client.query(
+        `SELECT id FROM members WHERE trip_id = $1 AND user_id = $2 LIMIT 1`,
+        [trip.id, userId],
+      )).rows[0];
       if (!member) {
-        member = (await client.query(`INSERT INTO members (trip_id, name) VALUES ($1, $2) RETURNING id`, [trip.id, uname])).rows[0];
+        // 旧データに同名メンバーがあれば本人へ安全に紐づけ、無ければ新規作成する。
+        member = (await client.query(
+          `UPDATE members SET user_id = $3
+            WHERE id = (
+              SELECT id FROM members
+               WHERE trip_id = $1 AND name = $2 AND user_id IS NULL
+               ORDER BY id LIMIT 1
+            )
+          RETURNING id`,
+          [trip.id, uname, userId],
+        )).rows[0];
+      }
+      if (!member) {
+        member = (await client.query(
+          `INSERT INTO members (trip_id, name, user_id) VALUES ($1, $2, $3) RETURNING id`,
+          [trip.id, uname, userId],
+        )).rows[0];
       }
       const receipt = await client.query(
         `INSERT INTO receipts (trip_id, store_name, purchased_on, paid_by, category, lat, lng, place_name)

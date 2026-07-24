@@ -70,6 +70,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
   ON users (lower(email)) WHERE email IS NOT NULL;
+-- 共有家計簿で「支払った人」をログインユーザーと正確に結びつける。
+-- 旅行用の手動メンバーは user_id=NULL のまま利用できる。
+ALTER TABLE members ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_trip_user
+  ON members (trip_id, user_id) WHERE user_id IS NOT NULL;
 -- 既存DB向け（冪等）: アクセスの見える化（誰がいつ作った/ログインしたか。scripts/who.ts で確認）
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count integer NOT NULL DEFAULT 0;
@@ -265,6 +270,10 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_used integer NOT NULL DEF
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_week_on date;               -- その週の月曜日（JST）
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ocr_week_used integer NOT NULL DEFAULT 0;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS premium_until timestamptz;      -- NULL=無料。IAP実装(M3)がここを書く
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_goal_icons boolean NOT NULL DEFAULT false;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_season_costumes boolean NOT NULL DEFAULT false;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS iap_synced_at timestamptz;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS season_costume TEXT;
 CREATE INDEX IF NOT EXISTS idx_chores_link ON chores (link_id);
 CREATE INDEX IF NOT EXISTS idx_chore_logs_chore ON chore_logs (chore_id);
 

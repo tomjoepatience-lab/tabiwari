@@ -1,4 +1,4 @@
-import { api, AppMode, Group, IncomeRow, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, SavingsGoal, Trip, TripDetail, User, UsageType, UserSettings } from './api';
+import { api, AppMode, Group, IncomeRow, IapStatus, Member, Overview, ProjectKind, QuickReward, Receipt, RecentReceipt, SavingsGoal, Trip, TripDetail, User, UsageType, UserSettings } from './api';
 import { el, yen, signedYen, fmtDate, labeled, todayIso } from './ui';
 import { resizeImage } from './image';
 import { runOcr } from './ocr';
@@ -15,6 +15,7 @@ import { phoneCanvas, esc } from './phone';
 import { adultAddForm, receiptCard, canvasModal, genreColor } from './records';
 import { monthlyInsights, lastMonthSummary, monthlyNeeded } from './insights';
 import { hasNativeMap, openNativeMapPicker, openNativeMapViewer } from './native-map';
+import { getNativeIapState, hasNativeIap, purchaseNativeIap, restoreNativeIap, NativeIapState } from './native-iap';
 import { applyDisplayPreferences, PREF_KEYS, preferenceEnabled, setPreference, PreferenceKey } from './preferences';
 import { classifyItem, GENRES, Genre } from '../shared/genre';
 
@@ -45,6 +46,8 @@ type HomeTab = 'home' | 'add' | 'report' | 'savings' | 'menu';
 let homeTab: HomeTab = 'home';
 let overviewCache: Overview | null = null;
 let recentCache: RecentReceipt[] | null = null;
+let recentCacheScope = '';
+let reportGroupIds: number[] = [];
 let incomesCache: IncomeRow[] | null = null; // レポートのカレンダーに載せる収入一覧
 let calMonth = new Date();
 // 記録直後にマネコがお祝いするための持ち越し
@@ -464,10 +467,16 @@ function kidsRecordPhoto(o: Overview): HTMLElement[] {
   return kidsPhotoShell({ active: 'add', family: o.settings?.usage_type !== 'personal', scene: 'record', body, goTab: (tab) => { homeTab = tab as HomeTab; void renderHome(); } });
 }
 
-function kidsReportPhoto(o: Overview, recent: RecentReceipt[], incomes: IncomeRow[]): HTMLElement[] {
+function kidsReportPhoto(
+  o: Overview,
+  recent: RecentReceipt[],
+  incomes: IncomeRow[],
+  groupSwitcher: HTMLElement | null,
+): HTMLElement[] {
   const now = new Date();
   const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const thisMonth = recent.filter((receipt) => receipt.purchased_on.startsWith(currentKey));
+  const monthSpend = thisMonth.reduce((sum, receipt) => sum + receipt.total, 0);
   const days = new Set(thisMonth.map((receipt) => receipt.purchased_on.slice(0, 10))).size;
   const backToRecord = el('button', { type: 'button', class: 'kids-photo-secondary kids-report-record-button' }, [
     kidsLineIcon('camera'),
@@ -475,11 +484,12 @@ function kidsReportPhoto(o: Overview, recent: RecentReceipt[], incomes: IncomeRo
   ]);
   backToRecord.addEventListener('click', () => { homeTab = 'add'; void renderHome(); });
   const body = [
+    ...(groupSwitcher ? [groupSwitcher] : []),
     kidsRecordModeSwitch('report'),
     el('h1', { class: 'kids-photo-title', textContent: 'レポート' }),
     el('section', { class: 'kids-report-summary' }, [
       el('span', { textContent: `${now.getMonth() + 1}月の支出` }),
-      el('strong', { textContent: yen(o.month.spend) }),
+      el('strong', { textContent: `-${yen(monthSpend)}` }),
       el('small', { textContent: `記録した日 ${days}日 ・ ${thisMonth.length}件` }),
     ]),
     genreReportSec(recent),
@@ -497,7 +507,11 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   const goalSelect = el('select', { class: 'kids-photo-goal-select' },
     o.goals.map((goal) => el('option', { value: String(goal.id), textContent: goal.name })));
   if (selected) goalSelect.value = String(selected.id);
-  const goalIcon = el('img', { class: 'kids-photo-goal-emoji', src: goalIconPath(selected?.emoji), alt: '' });
+  const goalIcon = el('img', {
+    class: 'kids-photo-goal-emoji',
+    src: goalIconPath(selected?.emoji, o.settings?.iap_goal_icons),
+    alt: '',
+  });
   const name = el('strong', { class: 'kids-photo-goal-name', textContent: selected?.name ?? '最初の目標' });
   const numbers = el('div', { class: 'kids-photo-goal-numbers' });
   const percent = el('b', { class: 'kids-photo-goal-percent' });
@@ -506,7 +520,7 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   const updateGoal = () => {
     selected = o.goals.find((goal) => String(goal.id) === goalSelect.value) ?? selected;
     const pct = selected ? Math.min(100, Math.floor(selected.saved / Math.max(1, selected.target) * 100)) : 0;
-    goalIcon.src = goalIconPath(selected?.emoji);
+    goalIcon.src = goalIconPath(selected?.emoji, o.settings?.iap_goal_icons);
     name.textContent = selected?.name ?? '最初の目標';
     numbers.textContent = selected ? `${yen(selected.saved)} / ${yen(selected.target)}` : '目標を作成してください';
     percent.textContent = `${pct}%`;
@@ -559,19 +573,41 @@ function kidsSavingsPhoto(o: Overview): HTMLElement[] {
   const newName = el('input', { placeholder: '目標の名前' });
   const newTarget = el('input', { type: 'number', inputMode: 'numeric', placeholder: '目標金額', min: '1' });
   const iconOptions = [
-    { emoji: '🚲', key: 'bike', label: '自転車' },
-    { emoji: '🎮', key: 'game', label: 'ゲーム' },
-    { emoji: '📱', key: 'phone', label: 'スマホ' },
-    { emoji: '👟', key: 'shoes', label: '靴' },
-    { emoji: '✈️', key: 'travel', label: '旅行' },
+    { emoji: '🚲', key: 'bike', label: '自転車', premium: false },
+    { emoji: '🎮', key: 'game', label: 'ゲーム', premium: false },
+    { emoji: '📱', key: 'phone', label: 'スマホ', premium: false },
+    { emoji: '👟', key: 'shoes', label: '靴', premium: false },
+    { emoji: '✈️', key: 'travel', label: '旅行', premium: false },
+    { emoji: '🧸', key: 'teddy', label: 'ぬいぐるみ', premium: true },
+    { emoji: '📷', key: 'camera', label: 'カメラ', premium: true },
+    { emoji: '🎧', key: 'headphones', label: 'ヘッドホン', premium: true },
+    { emoji: '💻', key: 'laptop', label: 'パソコン', premium: true },
+    { emoji: '🎸', key: 'guitar', label: 'ギター', premium: true },
+    { emoji: '📚', key: 'books', label: '本', premium: true },
+    { emoji: '🐾', key: 'pet', label: 'ペット用品', premium: true },
+    { emoji: '🛋️', key: 'sofa', label: '家具', premium: true },
+    { emoji: '💄', key: 'cosmetics', label: 'コスメ', premium: true },
+    { emoji: '🎁', key: 'gift', label: 'プレゼント', premium: true },
   ];
   let selectedEmoji = iconOptions[0].emoji;
   const iconPicker = el('div', { class: 'kids-goal-icon-picker' });
   const drawIconPicker = () => iconPicker.replaceChildren(...iconOptions.map((option) => {
-    const button = el('button', { type: 'button', class: 'kids-goal-icon-option' + (selectedEmoji === option.emoji ? ' active' : ''), 'aria-label': option.label } as any, [
-      el('img', { src: `/assets/kids/goal-${option.key}.webp`, alt: '' }),
+    const locked = option.premium && !o.settings?.iap_goal_icons;
+    const button = el('button', {
+      type: 'button',
+      class: 'kids-goal-icon-option' + (selectedEmoji === option.emoji ? ' active' : '') + (locked ? ' locked' : ''),
+      'aria-label': option.label,
+    } as any, [
+      el('img', { src: option.premium
+        ? `/assets/kids/premium/goals/premium-goal-${option.key}.png`
+        : `/assets/kids/goal-${option.key}.webp`, alt: '' }),
+      ...(locked ? [el('span', { class: 'kids-goal-icon-lock', textContent: '🔒' })] : []),
     ]);
-    button.addEventListener('click', () => { selectedEmoji = option.emoji; drawIconPicker(); });
+    button.addEventListener('click', () => {
+      if (locked) return alert('かわいい目標アイコンパックは「設定 → アカウント」から購入できます');
+      selectedEmoji = option.emoji;
+      drawIconPicker();
+    });
     return button;
   }));
   drawIconPicker();
@@ -773,6 +809,48 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
     homeTab = 'home';
     void renderHome();
   });
+  const seasonCostumes = [
+    ['spring-sakura', '春・さくら'],
+    ['spring-picnic', '春・ピクニック'],
+    ['summer-marine', '夏・マリン'],
+    ['summer-festival', '夏・お祭り'],
+    ['autumn-artist', '秋・芸術'],
+    ['autumn-harvest', '秋・実り'],
+    ['winter-snow', '冬・雪あそび'],
+    ['winter-holiday', '冬・ホリデー'],
+  ] as const;
+  const costumeGrid = el('div', { class: 'season-costume-grid' });
+  const drawCostumes = () => {
+    const selected = o.settings?.season_costume ?? null;
+    costumeGrid.replaceChildren(
+      ...seasonCostumes.map(([id, label]) => {
+        const button = el('button', {
+          type: 'button',
+          class: 'season-costume-option' + (selected === id ? ' active' : '') + (!o.settings?.iap_season_costumes ? ' locked' : ''),
+          'aria-label': label,
+        } as any, [
+          el('img', { src: `/assets/kids/premium/costumes/season-${id}.png`, alt: '' }),
+          el('span', { textContent: label }),
+          ...(!o.settings?.iap_season_costumes ? [el('b', { textContent: '🔒' })] : []),
+        ]);
+        button.addEventListener('click', async () => {
+          if (!o.settings?.iap_season_costumes) return alert('季節の衣装パックは「アカウント」から購入できます');
+          await api.setSeasonCostume(selected === id ? null : id);
+          overviewCache = null;
+          await renderHome();
+        });
+        return button;
+      }),
+    );
+  };
+  drawCostumes();
+  const costumeSection = el('section', { class: 'card' }, [
+    el('h2', { textContent: '👕 季節の着せ替え' }),
+    el('p', { class: 'muted', textContent: o.settings?.iap_season_costumes
+      ? 'マネコに着せる衣装を選べます。選択中の衣装をもう一度押すと外せます。'
+      : '季節の衣装パックで春夏秋冬8種類を選べます。' }),
+    costumeGrid,
+  ]);
   const display = el('section', { class: 'card' }, [
     el('h2', { textContent: '▣ 表示' }),
     preferenceRow(
@@ -794,7 +872,7 @@ async function kidsSettingsPhoto(o: Overview): Promise<HTMLElement[]> {
   const pages = {
     profile: pageSections('profile'),
     notifications: [notifications],
-    display: [display],
+    display: [display, costumeSection],
     account: pageSections('account'),
   };
   const detailTitle = el('h1', { class: 'kids-photo-title', textContent: 'プロフィール' });
@@ -1121,27 +1199,45 @@ function showTutorialOverlay(usage: UsageType, anchorPanel: HTMLElement, overvie
   window.addEventListener('resize', placeSpotlight, { once: true });
 }
 
-function spaceSwitcher(mode: AppMode): HTMLElement | null {
+function reportGroupSwitcher(): HTMLElement | null {
   if (!myGroups.length) return null;
-  const select = el('select', { class: 'space-select', 'aria-label': '家計簿スペース' } as any,
-    myGroups.map((g) => el('option', { value: String(g.id), textContent: mode === 'kids' ? `👛 ${g.name}` : `🏠 ${g.name}` })));
-  select.value = String(activeGroupId ?? myGroups[0].id);
-  select.addEventListener('change', async () => {
-    const groupId = Number(select.value);
-    select.disabled = true;
-    try {
-      await api.saveSettings({ active_group_id: groupId });
-      activeGroupId = groupId;
-      overviewCache = null;
-      recentCache = null;
-      incomesCache = null;
-      await renderHome();
-    } catch (e) {
-      select.disabled = false;
-      alert((e as Error).message);
-    }
-  });
-  return el('div', { class: 'space-switcher' }, [select]);
+  const available = new Set(myGroups.map((group) => group.id));
+  reportGroupIds = reportGroupIds.filter((id) => available.has(id));
+  if (!reportGroupIds.length) reportGroupIds = [activeGroupId ?? myGroups[0].id];
+
+  const rail = el('div', { class: 'report-group-rail', role: 'group', 'aria-label': '表示する家計簿' } as any);
+  const renderButtons = () => {
+    rail.replaceChildren(...myGroups.map((group) => {
+      const selected = reportGroupIds.includes(group.id);
+      const button = el('button', {
+        type: 'button',
+        class: 'report-group-button' + (selected ? ' active' : ''),
+        'aria-pressed': String(selected),
+      } as any, [
+        el('span', { class: 'report-group-check', textContent: selected ? '✓' : '' }),
+        el('span', { textContent: group.name }),
+      ]);
+      button.addEventListener('click', async () => {
+        if (selected && reportGroupIds.length === 1) {
+          button.classList.add('shake');
+          window.setTimeout(() => button.classList.remove('shake'), 280);
+          return;
+        }
+        reportGroupIds = selected
+          ? reportGroupIds.filter((id) => id !== group.id)
+          : [...reportGroupIds, group.id];
+        recentCache = null;
+        recentCacheScope = '';
+        await renderHome();
+      });
+      return button;
+    }));
+  };
+  renderButtons();
+  return el('div', { class: 'report-group-switcher' }, [
+    el('span', { class: 'report-group-label', textContent: '表示する家計簿' }),
+    rail,
+  ]);
 }
 
 // 家計簿スペース管理（一覧・作成・招待URLで参加）
@@ -1245,8 +1341,16 @@ async function renderHome() {
   // レポートタブはカレンダーに収入も載せるので、recent と並行で incomes を取得する
   const incomesP = homeTab === 'report' && !incomesCache ? api.listIncomes().catch(() => null) : null;
   let recentFailed = false;
+  const recentScopeIds = homeTab === 'report'
+    ? (reportGroupIds.length ? reportGroupIds : [activeGroupId ?? myGroups[0]?.id].filter((id): id is number => id != null))
+    : [activeGroupId].filter((id): id is number => id != null);
+  const nextRecentScope = recentScopeIds.slice().sort((a, b) => a - b).join(',');
+  if (recentCacheScope !== nextRecentScope) recentCache = null;
   if (!recentCache) {
-    try { recentCache = (await api.recentExpenses(366, activeGroupId ?? undefined)).receipts; }
+    try {
+      recentCache = (await api.recentExpenses(366, recentScopeIds)).receipts;
+      recentCacheScope = nextRecentScope;
+    }
     catch { recentFailed = true; }
   }
   if (incomesP) {
@@ -1294,9 +1398,10 @@ async function renderHome() {
     panels = mode === 'kids' ? kidsRecordPhoto(o) : wrapPhone(mode, homeTab, quickAddPanel(mode));
   } else if (homeTab === 'report') {
     const incomes = incomesCache ?? [];
+    const groupSwitcher = reportGroupSwitcher();
     panels = mode === 'kids'
-      ? kidsReportPhoto(o, recent, incomes)
-      : wrapPhone(mode, homeTab, [genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]);
+      ? kidsReportPhoto(o, recent, incomes, groupSwitcher)
+      : wrapPhone(mode, homeTab, [...(groupSwitcher ? [groupSwitcher] : []), genreReportSec(recent), ...reportPanel(recent), calendarPanel(recent, false, incomes), mapPanel(recent)]);
   } else if (homeTab === 'savings') {
     panels = mode === 'kids' ? kidsSavingsPhoto(o) : wrapPhone(mode, homeTab, savingsPanel(o, mode));
   } else {
@@ -1307,11 +1412,6 @@ async function renderHome() {
 
   if (epoch !== renderEpoch) return; // 古い描画は捨てる（settingsPanel の await 対策）
   app().replaceChildren(...panels);
-  // マネコタウンは承認済みモックの固定レイアウトを優先する。
-  // 保存先は記録画面内で選べるため、全画面共通の上部ピルは大人モードだけに表示する。
-  const switcher = mode === 'adult' ? spaceSwitcher(mode) : null;
-  const canvas = panels[0]?.querySelector<HTMLElement>('.pc-canvas') ?? panels[0];
-  if (switcher && canvas) canvas.append(switcher);
   window.scrollTo({ top: 0 });
 
   // 初回チュートリアル（利用タイプ選択の直後・ホームで1回だけ）。
@@ -1558,6 +1658,134 @@ function choreRow(c: { id: number; name: string; points: number; pending: boolea
 }
 
 // --- ⚙️ せってい / メニュー ------------------------------------------------
+const IAP_PRODUCTS = {
+  plusMonthly: 'com.tomjo.maneko.plus.monthly',
+  plusAnnual: 'com.tomjo.maneko.plus.annual',
+  goalIcons: 'com.tomjo.maneko.goalicons.cute',
+  seasonCostumes: 'com.tomjo.maneko.costumes.seasons',
+} as const;
+
+async function iapCard(): Promise<HTMLElement> {
+  const status = await api.iapStatus().catch((): IapStatus => ({
+    plus: false,
+    goal_icons: false,
+    season_costumes: false,
+    premium_until: null,
+    synced_at: null,
+    app_user_id: currentUser ? `maneko-user-${currentUser.id}` : '',
+  }));
+  let nativeState: NativeIapState | null = null;
+  if (currentUser && hasNativeIap()) {
+    nativeState = await getNativeIapState(currentUser.id).catch((error): NativeIapState => ({
+      configured: false,
+      products: [],
+      entitlements: [],
+      error: (error as Error).message,
+    }));
+  }
+  const priceOf = (id: string, fallback: string) =>
+    nativeState?.products.find((product) => product.id === id)?.price ?? fallback;
+  const activeSubscriptions = new Set(nativeState?.activeProductIds ?? []);
+  const hasKnownActiveSubscription = activeSubscriptions.size > 0;
+  const monthlyOwned = activeSubscriptions.has(IAP_PRODUCTS.plusMonthly)
+    || (status.plus && !hasKnownActiveSubscription);
+  const annualOwned = activeSubscriptions.has(IAP_PRODUCTS.plusAnnual)
+    || (status.plus && !hasKnownActiveSubscription);
+
+  const card = el('section', { class: 'card iap-card' }, [
+    el('div', { class: 'iap-heading' }, [
+      el('div', {}, [
+        el('span', { class: 'iap-kicker', textContent: 'MANEKO STORE' }),
+        el('h2', { textContent: 'マネコプラス・アイテム' }),
+      ]),
+      ...(status.plus ? [el('span', { class: 'iap-owned-badge', textContent: 'PLUS' })] : []),
+    ]),
+    el('p', { class: 'muted', textContent: '購入はApple IDに紐づきます。買い切りアイテムは購入後ずっと使えます。' }),
+  ]);
+
+  const syncAfterPurchase = async () => {
+    await api.syncIap();
+    overviewCache = null;
+    alert('購入情報を反映しました');
+    await renderHome();
+  };
+  const buy = async (button: HTMLButtonElement, productId: string) => {
+    if (!currentUser || !hasNativeIap()) return alert('購入はApp Store版で利用できます');
+    button.disabled = true;
+    const before = button.textContent;
+    button.textContent = 'App Storeを確認中…';
+    try {
+      const result = await purchaseNativeIap(currentUser.id, productId);
+      if (result.error) throw new Error(result.error);
+      await syncAfterPurchase();
+    } catch (error) {
+      if ((error as Error).message !== '購入をキャンセルしました') alert((error as Error).message);
+      button.disabled = false;
+      button.textContent = before;
+    }
+  };
+  const product = (
+    title: string,
+    description: string,
+    price: string,
+    productId: string,
+    owned: boolean,
+    accent = false,
+  ) => {
+    const button = el('button', {
+      type: 'button',
+      class: 'iap-buy' + (accent ? ' primary' : ''),
+      textContent: owned ? '購入済み' : `${price}で購入`,
+      disabled: owned,
+    }) as HTMLButtonElement;
+    if (!owned) button.addEventListener('click', () => void buy(button, productId));
+    return el('div', { class: 'iap-product' + (accent ? ' featured' : '') }, [
+      el('div', { class: 'iap-product-copy' }, [
+        el('strong', { textContent: title }),
+        el('small', { textContent: description }),
+      ]),
+      button,
+    ]);
+  };
+
+  card.append(
+    el('div', { class: 'iap-plus-box' }, [
+      el('strong', { textContent: 'マネコプラス' }),
+      el('span', { textContent: 'レシート読み取りが無制限' }),
+      product('月額プラン', '毎月更新・いつでも変更できます', priceOf(IAP_PRODUCTS.plusMonthly, '¥380'), IAP_PRODUCTS.plusMonthly, monthlyOwned, true),
+      product('年額プラン', '月額換算でお得な年間プラン', priceOf(IAP_PRODUCTS.plusAnnual, '¥2,980'), IAP_PRODUCTS.plusAnnual, annualOwned, true),
+    ]),
+    product('かわいい目標アイコンパック', '目標貯金で使えるプレミアムアイコン10種類以上', priceOf(IAP_PRODUCTS.goalIcons, '¥160'), IAP_PRODUCTS.goalIcons, status.goal_icons),
+    product('季節の衣装パック', '春夏秋冬それぞれ2種類・合計8種類', priceOf(IAP_PRODUCTS.seasonCostumes, '¥320'), IAP_PRODUCTS.seasonCostumes, status.season_costumes),
+  );
+
+  const restore = el('button', { type: 'button', class: 'link-btn', textContent: '購入を復元' }) as HTMLButtonElement;
+  restore.addEventListener('click', async () => {
+    if (!currentUser || !hasNativeIap()) return alert('復元はApp Store版で利用できます');
+    restore.disabled = true;
+    try {
+      const result = await restoreNativeIap(currentUser.id);
+      if (result.error) throw new Error(result.error);
+      await syncAfterPurchase();
+    } catch (error) {
+      alert((error as Error).message);
+      restore.disabled = false;
+    }
+  });
+  card.append(
+    el('div', { class: 'iap-footer' }, [
+      restore,
+      el('a', { class: 'link-btn', href: 'https://apps.apple.com/account/subscriptions', target: '_blank', textContent: 'サブスクリプションを管理' }),
+      el('a', { class: 'link-btn', href: '/terms.html', target: '_blank', textContent: '利用規約' }),
+      el('a', { class: 'link-btn', href: '/privacy.html', target: '_blank', textContent: 'プライバシー' }),
+    ]),
+    el('p', { class: 'iap-note', textContent: 'マネコプラスは月額または年額の自動更新です。期間終了の24時間前までに解約しない限り、Apple IDへ課金され更新されます。' }),
+    ...(!hasNativeIap() ? [el('p', { class: 'iap-note', textContent: '購入・復元はApp Storeからインストールしたアプリで利用できます。' })] : []),
+    ...(nativeState?.error ? [el('p', { class: 'status err', textContent: nativeState.error })] : []),
+  );
+  return card;
+}
+
 async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]> {
   const s = o.settings!;
   const kids = mode === 'kids';
@@ -1716,6 +1944,8 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
 
   const spacesSec = groupsCard(myGroups);
   spacesSec.dataset.settingsPage = 'account';
+  const storeSec = await iapCard();
+  storeSec.dataset.settingsPage = 'account';
   if (kids && familySec) {
     const intro = el('section', { class: 'card family-tab-intro' }, [
       el('span', { class: 'family-tab-kicker', textContent: 'FAMILY' }),
@@ -1724,11 +1954,11 @@ async function settingsPanel(o: Overview, mode: AppMode): Promise<HTMLElement[]>
     ]);
     const settingsDrawer = el('details', { class: 'settings-drawer' }, [
       el('summary', { textContent: '⚙️ 設定とアカウント' }),
-      el('div', { class: 'settings-drawer-body' }, [modeSec, spacesSec, usageSec, moneySec, logoutSec]),
+      el('div', { class: 'settings-drawer-body' }, [modeSec, storeSec, spacesSec, usageSec, moneySec, logoutSec]),
     ]);
     return [intro, familySec, settingsDrawer];
   }
-  return [modeSec, spacesSec, usageSec, moneySec, logoutSec];
+  return [modeSec, storeSec, spacesSec, usageSec, moneySec, logoutSec];
 }
 
 // --- 👨‍👩‍👧 親子アカウント連携 --------------------------------------------
@@ -2231,23 +2461,32 @@ function calendarPanel(recent: RecentReceipt[], readonly = false, incomes: Incom
     const todayIso = iso(now.getFullYear(), now.getMonth(), now.getDate());
     const cells: HTMLElement[] = ['日', '月', '火', '水', '木', '金', '土'].map((w) => el('div', { class: 'cal-w', textContent: w }));
     for (let i = 0; i < firstDow; i++) cells.push(el('div'));
-    let monthTotal = 0;
+    let monthSpend = 0;
+    let monthIncome = 0;
     for (let d = 1; d <= daysInMonth; d++) {
       const day = iso(y, m, d);
       const e = byDay.get(day);
-      const hasInc = incByDay.has(day);
-      if (e) monthTotal += e.total;
+      const dayIncomes = incByDay.get(day) ?? [];
+      const incomeTotal = dayIncomes.reduce((sum, income) => sum + income.amount, 0);
+      const hasInc = incomeTotal > 0;
+      if (e) monthSpend += e.total;
+      monthIncome += incomeTotal;
       const cell = el('button', { class: 'cal-cell' + (e ? ' has' : '') + (day === todayIso ? ' today' : '') }, [
-        el('span', { class: 'cal-d', textContent: String(d) }),
-        el('span', { class: 'cal-t', textContent: e ? yen(e.total) : '' }),
-        // 収入マーク: 支出（金額表示）と区別できる小さな緑の＋ドット
-        ...(hasInc ? [el('span', { class: 'cal-inc-dot', textContent: '＋' })] : []),
+        el('span', {
+          class: 'cal-d' + (e && hasInc ? ' has-both' : e ? ' has-expense' : hasInc ? ' has-income' : ''),
+          textContent: String(d),
+        }),
+        ...(hasInc ? [el('span', { class: 'cal-t income', textContent: `+${yen(incomeTotal)}` })] : []),
+        ...(e ? [el('span', { class: 'cal-t expense', textContent: `-${yen(e.total)}` })] : []),
       ]);
       cell.addEventListener('click', () => showDay(day));
       cells.push(cell);
     }
     grid.replaceChildren(...cells);
-    monthTotalEl.textContent = `月合計 ${yen(monthTotal)}`;
+    monthTotalEl.replaceChildren(
+      el('span', { class: 'cal-month-income', textContent: `収入 +${yen(monthIncome)}` }),
+      el('span', { class: 'cal-month-expense', textContent: `支出 -${yen(monthSpend)}` }),
+    );
   }
   const prev = el('button', { class: 'cal-nav', textContent: '‹' });
   const next = el('button', { class: 'cal-nav', textContent: '›' });
@@ -2319,7 +2558,9 @@ function mapPanel(recent: RecentReceipt[]): HTMLElement {
       lat: r.lat!,
       lng: r.lng!,
       title: r.store_name || '買い物',
-      subtitle: `${fmtDate(r.purchased_on)}・${yen(r.total)}`,
+      subtitle: `${fmtDate(r.purchased_on)}・-${yen(r.total)}${
+        r.group_member_count >= 2 && r.paid_by_name ? `・支払った人：${r.paid_by_name}` : ''
+      }`,
     })), '買い物マップ');
   });
   const sec = el('section', { class: 'card' }, [
@@ -3649,6 +3890,12 @@ async function boot() {
   if (!me) { currentUser = null; renderAuth(); return; }
   currentUser = me.user;
   myGroups = me.groups;
+  if (hasNativeIap()) {
+    void getNativeIapState(currentUser.id)
+      .then((state) => state.configured ? api.syncIap() : null)
+      .then((synced) => { if (synced) overviewCache = null; })
+      .catch(() => { /* オフラインや未設定でも通常利用は継続する */ });
+  }
   const inviteToken = inviteTokenFromLocation();
   if (inviteToken) {
     try {

@@ -50,9 +50,18 @@ export function receiptCard(r: RecentReceipt, opts: { onChanged?: () => void; re
 
   // ヘッダー: 店名・日付・場所
   const dateStr = r.purchased_on.slice(0, 10).replace(/-/g, '/');
+  const meta = el('div', { class: 'rc-meta' }, [
+    el('span', { textContent: dateStr + (r.place_name ? ` ・ 📍${r.place_name}` : '') }),
+  ]);
+  if (r.group_member_count >= 2 && r.paid_by_name) {
+    const payer = el('span', { class: 'rc-payer', textContent: `支払った人：${r.paid_by_name}` });
+    const payerColors = ['#1F8A5B', '#C85C3F', '#9A7417', '#376DAA', '#7650A8', '#B64D77'];
+    payer.style.setProperty('--payer-color', payerColors[Math.abs(r.paid_by ?? 0) % payerColors.length]);
+    meta.append(payer);
+  }
   card.append(el('div', { class: 'rc-head' }, [
     el('div', { class: 'rc-store', textContent: r.store_name || r.items[0]?.name || '記録' }),
-    el('div', { class: 'rc-meta', textContent: dateStr + (r.place_name ? ` ・ 📍${r.place_name}` : '') }),
+    meta,
   ]));
 
   // 明細: ジャンルごとにまとめて小計を出す（羅列しない）

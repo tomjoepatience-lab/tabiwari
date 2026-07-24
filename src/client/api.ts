@@ -44,6 +44,11 @@ export type UserSettings = {
   usage_type: UsageType | null; // 利用タイプ（家族/個人）。NULL=未選択（初回に選ばせる）
   tutorial_done: boolean;       // 初回チュートリアルの既読
   active_group_id: number | null; // 現在表示中の家計簿スペース
+  premium_until: string | null;
+  iap_goal_icons: boolean;
+  iap_season_costumes: boolean;
+  iap_synced_at: string | null;
+  season_costume: string | null;
 };
 export type Rarity = 'normal' | 'rare' | 'super';
 export type PresentResult = { costume: string; name: string; rarity: Rarity; coins: number };
@@ -85,16 +90,29 @@ export type ChildOverview = {
   recent: { store_name: string | null; total: number; purchased_on: string; first_item: string | null }[];
 };
 export type QuickReward = { xp: number; coins: number; level: number; levelUp: boolean; challengeCleared: boolean } | null;
+export type IapStatus = {
+  plus: boolean;
+  goal_icons: boolean;
+  season_costumes: boolean;
+  premium_until: string | null;
+  synced_at: string | null;
+  app_user_id: string;
+};
 export type RecentItem = { id: number; name: string; price: number; quantity: number; genre: string | null };
 export type RecentReceipt = {
   id: number;
   trip_id: number;
   trip_title: string;
   kind: ProjectKind;
+  group_id: number;
+  group_name: string;
+  group_member_count: number;
   store_name: string | null;
   category: string | null;
   purchased_on: string;
   created_at: string;
+  paid_by: number | null;
+  paid_by_name: string | null;
   lat: number | null;
   lng: number | null;
   place_name: string | null;
@@ -155,6 +173,14 @@ export const api = {
       if (!r.ok) await json(r);
     }),
   listGroups: () => fetch('/api/groups').then((r) => json<Group[]>(r)),
+  iapStatus: () => fetch('/api/iap/status').then((r) => json<IapStatus>(r)),
+  syncIap: () => fetch('/api/iap/sync', { method: 'POST' }).then((r) => json<IapStatus>(r)),
+  setSeasonCostume: (id: string | null) =>
+    fetch('/api/iap/season-costume', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).then((r) => json<{ season_costume: string | null }>(r)),
   createGroup: (name: string) =>
     fetch('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<Group>(r)),
   joinGroup: (invite_code: string) =>
@@ -190,8 +216,11 @@ export const api = {
   generateRecurring: (tripId: number, month?: string) =>
     fetch(`/api/trips/${tripId}/recurring/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }).then((r) => json<{ created: number; skipped: number; month: string }>(r)),
   analytics: () => fetch('/api/analytics').then((r) => json<Analytics>(r)),
-  recentExpenses: (days = 30, groupId?: number) =>
-    fetch(`/api/expenses/recent?days=${days}${groupId ? `&group_id=${groupId}` : ''}`).then((r) => json<{ receipts: RecentReceipt[] }>(r)),
+  recentExpenses: (days = 30, groupIds?: number | number[]) => {
+    const ids = Array.isArray(groupIds) ? groupIds : groupIds ? [groupIds] : [];
+    const scope = ids.length ? `&group_ids=${encodeURIComponent(ids.join(','))}` : '';
+    return fetch(`/api/expenses/recent?days=${days}${scope}`).then((r) => json<{ receipts: RecentReceipt[] }>(r));
+  },
   quickExpense: (body: {
     store_name?: string; category?: string; purchased_on: string;
     items: { name: string; price: number; genre?: string }[];

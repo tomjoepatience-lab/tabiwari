@@ -8,7 +8,22 @@ import { PREF_KEYS, preferenceEnabled } from './preferences';
 
 export type KidsTab = 'home' | 'report' | 'add' | 'savings' | 'menu';
 
-export function goalIconPath(emoji?: string | null): string {
+export function goalIconPath(emoji?: string | null, premiumAllowed = false): string {
+  const premium: Record<string, string> = {
+    '🧸': 'teddy',
+    '📷': 'camera',
+    '🎧': 'headphones',
+    '💻': 'laptop',
+    '🎸': 'guitar',
+    '📚': 'books',
+    '🐾': 'pet',
+    '🛋️': 'sofa',
+    '💄': 'cosmetics',
+    '🎁': 'gift',
+  };
+  if (premiumAllowed && emoji && premium[emoji]) {
+    return `/assets/kids/premium/goals/premium-goal-${premium[emoji]}.png`;
+  }
   const key =
     emoji === '🎮' ? 'game' :
     emoji === '📱' ? 'phone' :
@@ -16,6 +31,13 @@ export function goalIconPath(emoji?: string | null): string {
     emoji === '✈️' || emoji === '🧳' ? 'travel' :
     'bike';
   return `/assets/kids/goal-${key}.webp`;
+}
+
+export function seasonCostumePath(costume?: string | null): string | null {
+  if (!costume || !/^(spring-(sakura|picnic)|summer-(marine|festival)|autumn-(artist|harvest)|winter-(snow|holiday))$/.test(costume)) {
+    return null;
+  }
+  return `/assets/kids/premium/costumes/season-${costume}.png`;
 }
 
 export interface KidsHomeArgs {
@@ -149,6 +171,9 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
     : '';
   const isFamily = settings.usage_type !== 'personal';
   const moving = percent > previousPercent;
+  const seasonalCostume = settings.iap_season_costumes
+    ? seasonCostumePath(settings.season_costume)
+    : null;
   const html = `
     <main class="kids-home-v3 stage-${stage}" style="--walk-from-y:${walkFromY}px;--walk-to-y:${walkToY}px;--walk-from-scale:${walkFromScale};--walk-to-scale:${walkToScale}">
       <div class="kids-home-v3-bg" style="background-image:url('/assets/kids/home-stage-${stage}.webp')" aria-hidden="true"></div>
@@ -166,7 +191,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
       </button>
 
       <button type="button" id="k-goal" class="kids-goal-strip">
-        <img class="kids-goal-icon" src="${goalIconPath(goal?.emoji)}" alt="">
+        <img class="kids-goal-icon" src="${goalIconPath(goal?.emoji, settings.iap_goal_icons)}" alt="">
         <span class="kids-goal-strip-top">
           <strong>${goalLabel}</strong><b>${percent}%</b>
         </span>
@@ -179,6 +204,7 @@ export function kidsHome(args: KidsHomeArgs): HTMLElement[] {
       <div id="k-cat" class="kids-maneko-v3${moving ? ' is-moving' : ''}" aria-label="マネコ">
         <span class="kids-maneko-v3-shadow"></span>
         <img id="m-cat-body" src="/assets/kids/maneko-stage-${stage}.webp" alt="マネコ">
+        ${seasonalCostume ? `<img class="kids-maneko-season-costume" src="${seasonalCostume}" alt="">` : ''}
       </div>
 
       <div id="k-bubble" class="kids-bubble-v3" aria-live="polite">

@@ -580,11 +580,13 @@ button.big-add { font-size: 16px; padding: 13px 26px; border-radius: 999px; }
 .cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .cal-head h2 { margin: 0; }
 .cal-nav { padding: 4px 12px; border-radius: 999px; font-size: 16px; }
-.cal-month-total { font-weight: 700; color: var(--accent-deep); font-size: 14px; }
+.cal-month-total { display: flex; flex-wrap: wrap; gap: 3px 10px; font-weight: 800; font-size: 12px; }
+.cal-month-income, .cal-t.income { color: #187443; }
+.cal-month-expense, .cal-t.expense { color: #B1493A; }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .cal-w { text-align: center; font-size: 12px; color: var(--muted); padding: 2px 0; }
 .cal-cell {
-  position: relative; /* 収入マーク(.cal-inc-dot)の基準 */
+  position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   gap: 2px;
   min-height: 52px;
@@ -596,8 +598,11 @@ button.big-add { font-size: 16px; padding: 13px 26px; border-radius: 999px; }
 }
 .cal-cell.has { background: var(--accent-weak); }
 .cal-cell.today { outline: 2px solid var(--accent); }
-.cal-d { font-size: 12px; color: var(--text); }
-.cal-t { font-size: 10px; color: var(--accent-deep); font-weight: 700; word-break: keep-all; }
+.cal-d { font-size: 12px; color: var(--text); font-weight: 800; }
+.cal-d.has-income { color: #187443; }
+.cal-d.has-expense { color: #B1493A; }
+.cal-d.has-both { color: #6C4CA0; }
+.cal-t { font-size: 10px; font-weight: 800; line-height: 1.15; word-break: keep-all; }
 .cal-detail { margin-top: 12px; }
 .cal-row {
   display: flex; justify-content: space-between; gap: 10px;
@@ -1517,13 +1522,7 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 .app-toast.leaving { opacity: 0; transform: translateX(-50%) translateY(-8px); transition: opacity .2s, transform .2s; }
 @keyframes toast-pop { from { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(.9); } to { opacity: 1; transform: translateX(-50%); } }
 
-/* 📅 カレンダーの収入マーク（緑の＋ドット）と日別カードの収入行 */
-.cal-inc-dot {
-  position: absolute; top: 3px; right: 3px;
-  width: 13px; height: 13px; border-radius: 999px;
-  background: #2E9E5B; color: #fff;
-  font-size: 10px; font-weight: 800; line-height: 13px; text-align: center;
-}
+/* 📅 カレンダーの日別カードに表示する収入行 */
 .cal-inc-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   background: #EAF7EE; border: 1.5px solid #BCE3C8; border-radius: 12px;
@@ -1531,6 +1530,143 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
 }
 .cal-inc-name { font-size: 13px; font-weight: 700; color: #2E2A24; }
 .cal-inc-amt { color: #1E7A43; font-size: 13px; }
+
+/* レポート上部の複数家計簿切替。縦スクロール中も上部に固定し、横方向だけスライドする。 */
+.report-group-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 180;
+  margin: -10px -13px 4px;
+  padding: 9px 10px 8px;
+  background: rgba(255, 249, 235, .96);
+  border-bottom: 1px solid rgba(142, 94, 28, .14);
+  box-shadow: 0 5px 12px rgba(80, 50, 16, .08);
+  backdrop-filter: blur(12px);
+}
+.report-group-label {
+  display: block;
+  margin: 0 3px 5px;
+  color: #7B5C35;
+  font-size: 9px;
+  font-weight: 800;
+}
+.report-group-rail {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.report-group-rail::-webkit-scrollbar { display: none; }
+.report-group-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  scroll-snap-align: start;
+  padding: 7px 12px 7px 8px;
+  border: 1.5px solid #E3CEAA;
+  border-radius: 999px;
+  background: #FFFDF7;
+  color: #765638;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.report-group-button.active {
+  border-color: #E39A21;
+  background: linear-gradient(180deg,#FFF1C8,#FFE2A0);
+  color: #68430D;
+  box-shadow: 0 3px 8px rgba(181, 112, 14, .17);
+}
+.report-group-check {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid #D7BE96;
+  border-radius: 999px;
+  background: #FFF;
+  color: #FFF;
+  font-size: 11px;
+}
+.report-group-button.active .report-group-check {
+  border-color: #D9890D;
+  background: #E99A1B;
+}
+.report-group-button.shake { animation: report-group-shake .28s ease; }
+@keyframes report-group-shake {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.rc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.rc-payer {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--payer-color), transparent 60%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--payer-color), white 88%);
+  color: var(--payer-color);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+/* App Store IAP */
+.iap-card { overflow: hidden; }
+.iap-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.iap-heading h2 { margin: 1px 0 0; }
+.iap-kicker { color: #D78A14; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.iap-owned-badge {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg,#F9B53E,#EC8616);
+  color: #FFF;
+  font-size: 10px;
+  font-weight: 900;
+  box-shadow: 0 4px 10px rgba(195, 104, 10, .22);
+}
+.iap-plus-box {
+  margin: 12px 0;
+  padding: 13px;
+  border: 1.5px solid #E8AF4D;
+  border-radius: 17px;
+  background: linear-gradient(145deg,#FFF7D9,#FFE6AD);
+}
+.iap-plus-box > strong, .iap-plus-box > span { display: block; }
+.iap-plus-box > strong { color: #714611; font-size: 16px; }
+.iap-plus-box > span { margin: 2px 0 9px; color: #97703B; font-size: 10px; }
+.iap-product {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #EADCC5;
+  border-radius: 14px;
+  background: rgba(255,255,255,.82);
+}
+.iap-product-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.iap-product-copy strong { color: #5F4528; font-size: 12px; }
+.iap-product-copy small { color: #9A8062; font-size: 9px; line-height: 1.35; }
+.iap-buy {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.iap-buy:disabled { opacity: .62; }
+.iap-footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.iap-note { margin: 9px 0 0; color: #8C7357; font-size: 10px; text-align: center; }
 
 /* ======================================================================
    🐾 初回チュートリアル（利用タイプ選択の直後・1回だけ）
@@ -2078,6 +2214,12 @@ input.price { -moz-appearance: textfield; appearance: textfield; }
   object-position: center bottom;
   user-select: none;
   -webkit-user-drag: none;
+}
+.kids-maneko-v3 .kids-maneko-season-costume {
+  z-index: 2;
+  pointer-events: none;
+  object-fit: contain;
+  object-position: center bottom;
 }
 .kids-maneko-v3-shadow {
   position: absolute;
@@ -2958,6 +3100,70 @@ body.theme-kids .pc-scroll.kids-tab-shell .card {
   background: #fff0cf;
   box-shadow: inset 0 0 0 1px #ffc45d;
 }
+.kids-goal-icon-option.locked {
+  position: relative;
+  filter: saturate(.58);
+  opacity: .72;
+}
+.kids-goal-icon-lock {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(83,55,29,.9);
+  color: #fff8e8;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.season-costume-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 8px;
+}
+.season-costume-option {
+  position: relative;
+  min-width: 0;
+  padding: 8px 7px 7px;
+  border: 1px solid #ead7b5;
+  border-radius: 14px;
+  background: #fffaf0;
+  color: #79552e;
+  display: grid;
+  grid-template-rows: 78px auto;
+  justify-items: center;
+  gap: 4px;
+  font-family: inherit;
+}
+.season-costume-option img {
+  width: 100%;
+  height: 78px;
+  object-fit: contain;
+}
+.season-costume-option span { font-size: 9px; font-weight: 800; }
+.season-costume-option b {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(83,55,29,.88);
+  color: white;
+  font-size: 10px;
+}
+.season-costume-option.active {
+  border-color: #ef9e18;
+  background: #fff0cf;
+  box-shadow: inset 0 0 0 1px #ffc45d;
+}
+.season-costume-option.locked { filter: saturate(.62); opacity: .74; }
 
 /* Kids report: adult report information, reduced to one glance. */
 .kids-report-summary {
