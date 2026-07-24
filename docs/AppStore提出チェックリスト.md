@@ -46,3 +46,32 @@
 - iPhone小画面・Dynamic Type・オフライン / 通信失敗時の表示
 
 最終プレビューで確認が完了するまでproduction EAS buildは回さない。
+
+## 2026-07-24 リリース準備状況
+
+- [x] Vercel 本番デプロイ（認証メール・パスワード再設定を含む）
+- [x] Expo production環境にGoogle Maps iOS APIキーを設定
+- [x] App Icon 1024×1024・アルファなし
+- [x] iPad対応を有効化（`ios.supportsTablet: true`）
+- [x] カメラ・写真・位置情報の利用目的文言
+- [x] 非免除暗号化なし（`ITSAppUsesNonExemptEncryption: false`）
+- [x] `expo-doctor` 18/18、依存関係チェック正常
+- [x] 6.5インチスクリーンショット 6枚（1242×2688）
+- [x] 13インチスクリーンショット 6枚（2064×2752）
+- [ ] production EAS build完了
+- [ ] TestFlight実機で最終確認
+- [ ] App Store Connectメタデータ・App Privacy入力
+- [ ] 審査へ提出
+
+提出素材:
+
+- `app-store/README.md`
+- `app-store/screenshots/iphone-6.5/`
+- `app-store/screenshots/ipad-13/`
+
+productionビルド完了後:
+
+```powershell
+cd expo
+npx eas submit --platform ios --latest
+```

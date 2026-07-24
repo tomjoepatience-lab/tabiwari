@@ -8,10 +8,12 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.tomjo.maneko",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "レシートを読み取るために使用します",
-        "NSPhotoLibraryUsageDescription": "レシート画像や思い出写真を選ぶために使用します"
+        "NSPhotoLibraryUsageDescription": "レシート画像や思い出写真を選ぶために使用します",
+        "NSLocationWhenInUseUsageDescription": "買い物した場所を地図から選ぶために使用します",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
