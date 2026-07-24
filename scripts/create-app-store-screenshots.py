@@ -22,15 +22,6 @@ SLIDES = [
     ("06-settings.png", "ひとりでも家族でも\n自分らしく使える", "プロフィール・通知・表示をすっきり設定"),
 ]
 
-PORTRAIT_SOURCES = {"01-town.png", "05-journey.png"}
-WIDE_DETAILS = {
-    "02-record.png": ("maneko-receipt.webp", "レシートから読み取って、自動で分類"),
-    "03-savings.png": ("maneko-stage-2.webp", "目標までの進み具合が、ひと目でわかる"),
-    "04-report.png": ("maneko-3d.webp", "使った割合も、カレンダーも、地図も"),
-    "06-settings.png": ("maneko-settings.webp", "必要な設定だけを、すっきり整理"),
-}
-
-
 def font(path: Path, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(path), size=size, index=0)
 
@@ -86,6 +77,21 @@ def rounded_screen(
     )
     framed.paste(scaled, (border, border), mask)
     return framed
+
+
+def ipad_screen(phone_screen: Image.Image, target_width: int) -> Image.Image:
+    """Place the undistorted portrait app UI in a real 3:4 iPad-shaped canvas."""
+    target_height = round(target_width * 4 / 3)
+    backdrop = cover(phone_screen, (target_width, target_height))
+    backdrop = backdrop.filter(ImageFilter.GaussianBlur(max(18, target_width // 35)))
+    veil = Image.new("RGBA", backdrop.size, (255, 248, 231, 105))
+    tablet = Image.alpha_composite(backdrop.convert("RGBA"), veil).convert("RGB")
+
+    app_height = target_height
+    app_width = round(app_height * phone_screen.width / phone_screen.height)
+    app = phone_screen.resize((app_width, app_height), Image.Resampling.LANCZOS)
+    tablet.paste(app, ((target_width - app_width) // 2, 0))
+    return tablet
 
 
 def rounded_panel(image: Image.Image, size: tuple[int, int], radius: int) -> Image.Image:
@@ -191,93 +197,31 @@ def compose(
     )
 
     source_image = Image.open(SOURCE / screen_file).convert("RGB")
-    if screen_file in PORTRAIT_SOURCES:
-        raw_screen = crop_app(source_image)
-        phone_width = 900 if is_ipad else 890
-        device = rounded_screen(
-            raw_screen,
-            target_width=phone_width,
-            radius=85 if is_ipad else round(58 * scale),
-            border=24 if is_ipad else round(16 * scale),
-        )
-        device_x = (width - device.width) // 2
-        device_y = 720 if is_ipad else round(650 * scale)
-        shadow = Image.new("RGBA", output_size, (0, 0, 0, 0))
-        shadow_draw = ImageDraw.Draw(shadow)
-        shadow_draw.rounded_rectangle(
-            (
-                device_x + round(18 * scale),
-                device_y + round(28 * scale),
-                device_x + device.width + round(18 * scale),
-                device_y + device.height + round(28 * scale),
-            ),
-            radius=round(76 * scale),
-            fill=(67, 38, 15, 105),
-        )
-        shadow = shadow.filter(ImageFilter.GaussianBlur(round(34 * scale)))
-        base = Image.alpha_composite(base, shadow)
-        base.alpha_composite(device, (device_x, device_y))
-    else:
-        panel_size = (1780, 1000) if is_ipad else (1100, 619)
-        panel = rounded_panel(
-            source_image,
-            panel_size,
-            radius=54 if is_ipad else 38,
-        )
-        panel_x = (width - panel.width) // 2
-        panel_y = 750 if is_ipad else 650
-        shadow = Image.new("RGBA", output_size, (0, 0, 0, 0))
-        ImageDraw.Draw(shadow).rounded_rectangle(
-            (
-                panel_x + 18,
-                panel_y + 28,
-                panel_x + panel.width + 18,
-                panel_y + panel.height + 28,
-            ),
-            radius=70 if is_ipad else 50,
-            fill=(67, 38, 15, 100),
-        )
-        shadow = shadow.filter(ImageFilter.GaussianBlur(34 if is_ipad else 24))
-        base = Image.alpha_composite(base, shadow)
-        base.alpha_composite(panel, (panel_x, panel_y))
-
-        mascot_name, callout = WIDE_DETAILS[screen_file]
-        mascot = Image.open(
-            ROOT / "public" / "assets" / "kids" / mascot_name
-        ).convert("RGBA")
-        mascot.thumbnail(
-            (650, 880) if is_ipad else (430, 630),
-            Image.Resampling.LANCZOS,
-        )
-        mascot_x = width - mascot.width - (150 if is_ipad else 40)
-        mascot_y = height - mascot.height - (40 if is_ipad else 15)
-        base.alpha_composite(mascot, (mascot_x, mascot_y))
-
-        callout_w = 1120 if is_ipad else 760
-        callout_h = 150 if is_ipad else 104
-        callout_x = 120 if is_ipad else 58
-        callout_y = height - callout_h - (160 if is_ipad else 105)
-        callout_layer = Image.new("RGBA", output_size, (0, 0, 0, 0))
-        callout_draw = ImageDraw.Draw(callout_layer)
-        callout_draw.rounded_rectangle(
-            (
-                callout_x,
-                callout_y,
-                callout_x + callout_w,
-                callout_y + callout_h,
-            ),
-            radius=callout_h // 2,
-            fill=(255, 253, 247, 238),
-            outline=(255, 255, 255, 255),
-            width=3,
-        )
-        callout_draw.text(
-            (callout_x + (55 if is_ipad else 34), callout_y + (43 if is_ipad else 31)),
-            callout,
-            font=font(FONT_BOLD, 42 if is_ipad else 26),
-            fill=(106, 70, 37),
-        )
-        base = Image.alpha_composite(base, callout_layer)
+    raw_screen = crop_app(source_image)
+    display_screen = ipad_screen(raw_screen, 1450) if is_ipad else raw_screen
+    device = rounded_screen(
+        display_screen,
+        target_width=1450 if is_ipad else 890,
+        radius=82 if is_ipad else round(58 * scale),
+        border=24 if is_ipad else round(16 * scale),
+    )
+    device_x = (width - device.width) // 2
+    device_y = 720 if is_ipad else round(650 * scale)
+    shadow = Image.new("RGBA", output_size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle(
+        (
+            device_x + round(18 * scale),
+            device_y + round(28 * scale),
+            device_x + device.width + round(18 * scale),
+            device_y + device.height + round(28 * scale),
+        ),
+        radius=round(76 * scale),
+        fill=(67, 38, 15, 105),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(round(34 * scale)))
+    base = Image.alpha_composite(base, shadow)
+    base.alpha_composite(device, (device_x, device_y))
 
     # App Store screenshots must not contain alpha.
     output_path.parent.mkdir(parents=True, exist_ok=True)
